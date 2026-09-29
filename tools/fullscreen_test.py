@@ -51,7 +51,7 @@ from PyQt6.QtCore import QPoint, QTimer, Qt, QUrl
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
-from purebrowser.window import MainWindow
+from purebrowser.ui.window import MainWindow
 
 DEFAULT_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
 TARGET_URL = os.environ.get("PUREBROWSER_FULLSCREEN_URL", DEFAULT_URL)

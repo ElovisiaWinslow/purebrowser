@@ -25,8 +25,8 @@ from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
 from purebrowser.pages.pages import PureBrowserSchemeHandler
 from purebrowser.data.storage import connect
-from purebrowser.tab import Tab, to_url
-from purebrowser.urlbar import UrlBar
+from purebrowser.ui.tab import Tab, to_url
+from purebrowser.ui.urlbar import UrlBar
 
 # ---------------------------------------------------------------------------
 # 原生 Win32 全屏支持（ctypes，标准库，不引入新依赖）。

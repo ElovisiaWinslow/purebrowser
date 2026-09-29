@@ -30,7 +30,7 @@ def check_webengine_import():
 
 def check_purebrowser_import():
     import purebrowser
-    from purebrowser import window, tab, urlbar  # noqa
+    from purebrowser.ui import window, tab, urlbar  # noqa
     from purebrowser.core import profile, interceptor  # noqa
 
 

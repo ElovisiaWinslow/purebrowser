@@ -48,7 +48,7 @@ QWebEngineUrlScheme.registerScheme(_scheme)
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
-from purebrowser.window import MainWindow
+from purebrowser.ui.window import MainWindow
 
 SAMPLE_INTERVAL_MS = 5
 STEP_SETTLE_MS = 600
