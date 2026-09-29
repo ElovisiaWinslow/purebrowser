@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
         if bottom:
             return HTBOTTOM
         # 窗口控制键：交给 Qt 处理点击；最大化键在 Win11 返回 HTMAXBUTTON 以触发 Snap。
-        # 只对可见按钮生效（标题条隐藏时不吃命中）。
+        # 只对可见按钮生效。优先级高于下面的 HTCAPTION。
         for btn in (
             getattr(self, "win_min", None),
             getattr(self, "win_max", None),
@@ -685,8 +685,19 @@ class MainWindow(QMainWindow):
                 if btn is self.win_max and self._snap_supported():
                     return HTMAXBUTTON
                 return HTCLIENT
-        tb = getattr(self, "title_bar", None)
-        if tb is not None and tb.isVisible() and tb.geometry().contains(local):
+        # 顶行空白 → HTCAPTION（可拖动窗口 / 双击最大化）；
+        # 可见标签矩形、+ 按钮除外。标签矩形实时计算，不缓存。
+        tr = getattr(self, "top_row", None)
+        if tr is not None and tr.isVisible() and tr.geometry().contains(local):
+            pt = tr.mapFrom(self, local)
+            bar = self.tabs.tabBar()
+            bar_pt = bar.mapFrom(tr, pt)
+            for i in range(bar.count()):
+                if bar.isTabVisible(i) and bar.tabRect(i).contains(bar_pt):
+                    return HTCLIENT
+            plus = getattr(self, "tab_plus", None)
+            if plus is not None and plus.isVisible() and plus.geometry().contains(pt):
+                return HTCLIENT
             return HTCAPTION
         return HTCLIENT
 
