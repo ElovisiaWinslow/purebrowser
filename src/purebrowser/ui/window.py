@@ -25,6 +25,7 @@ from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
 from purebrowser.pages.pages import PureBrowserSchemeHandler
 from purebrowser.data.storage import connect
+from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.urlbar import UrlBar
 
@@ -137,6 +138,7 @@ class MainWindow(QMainWindow):
         self.data_dir = Path(data_dir)
         self.conn = connect(self.data_dir / "purebrowser.db")
         self.settings = Settings(settings_file())
+        self.theme = theme_mod.resolve_theme(self.settings.get("theme", "system"))
 
         netlog_env = os.environ.get("PUREBROWSER_NETLOG", "").strip()
         netlog_path = Path(netlog_env) if netlog_env else None
@@ -144,7 +146,7 @@ class MainWindow(QMainWindow):
         self.blocker = Blocker(self.settings, netlog_path=netlog_path)
         self.profile: QWebEngineProfile = build_profile(self.data_dir, self.blocker)
         self.scheme_handler = PureBrowserSchemeHandler(
-            self.settings, self.conn, self.data_dir, self
+            self.settings, self.conn, self.data_dir, self, theme=self.theme
         )
         self.profile.installUrlSchemeHandler(b"purebrowser", self.scheme_handler)
 

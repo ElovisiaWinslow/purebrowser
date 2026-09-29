@@ -19,18 +19,39 @@ REFRESH_SNIPPET = (
     b"<body><script>parent.location.reload();</script></body></html>"
 )
 
+
+def _theme_root(theme) -> str:
+    """把 Theme 的语义色转成 CSS 变量块（theme 为 None 时退回系统色）。"""
+    if theme is None:
+        return ":root{color-scheme:light dark;}"
+    return (
+        ":root{"
+        f"--bg:{theme.window};"
+        f"--panel:{theme.chrome};"
+        f"--text:{theme.text};"
+        f"--subtext:{theme.subtext};"
+        f"--accent:{theme.accent};"
+        f"--border:{theme.border};"
+        f"--hover:{theme.hover};"
+        f"--danger:{theme.danger};"
+        f"--on-accent:{theme.on_accent};"
+        "}"
+    )
+
+
 HISTORY_TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>历史记录</title>
 <style>
+  __THEME_ROOT__
   body { font: 14px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
-         background: Canvas; color: CanvasText; }
+         background: var(--bg); color: var(--text); }
   h1 { padding: 20px 24px 8px; font-size: 20px; margin: 0; }
   ul { list-style: none; margin: 0; padding: 8px 24px 32px; }
-  li { padding: 10px 0; border-bottom: 1px solid rgba(128,128,128,.2); }
+  li { padding: 10px 0; border-bottom: 1px solid var(--border); }
   a { color: inherit; text-decoration: none; display: block; }
   .title { font-weight: 600; }
-  .url { opacity: .6; font-size: 12px; margin-top: 2px; }
+  .url { opacity: .6; font-size: 12px; margin-top: 2px; color: var(--subtext); }
   .empty { padding: 40px; opacity: .6; text-align: center; }
 </style></head><body>
 <h1>历史记录</h1>
@@ -67,17 +88,18 @@ SETTINGS_TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>设置</title>
 <style>
+  __THEME_ROOT__
   body { font: 14px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
-         background: Canvas; color: CanvasText; }
+         background: var(--bg); color: var(--text); }
   .container { max-width: 760px; margin: 0 auto; padding: 32px 24px; }
   h1 { font-size: 22px; font-weight: 600; margin: 0 0 24px; }
-  section { margin-bottom: 24px; padding: 20px; border-radius: 12px;
-            background: color-mix(in oklab, Canvas 92%, CanvasText 8%);
-            border: 1px solid color-mix(in oklab, CanvasText 12%, transparent); }
+  section { margin-bottom: 24px; padding: 20px; border-radius: 10px;
+            background: var(--panel);
+            border: 1px solid var(--border); }
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
   .row { display: flex; align-items: center; justify-content: space-between;
          padding: 12px 0; gap: 16px; }
-  .row + .row { border-top: 1px solid color-mix(in oklab, CanvasText 8%, transparent); }
+  .row + .row { border-top: 1px solid var(--border); }
   label { flex: 1; min-width: 0; }
   .desc { opacity: 0.65; font-size: 12px; margin-top: 2px; }
   .path { opacity: 0.5; font-size: 12px; margin-top: 6px;
@@ -86,24 +108,41 @@ SETTINGS_TEMPLATE = """<!doctype html>
   .hint { opacity: 0.5; font-size: 12px; margin-top: 4px; }
   .btn-group { display: flex; gap: 6px; flex: 0 0 auto; }
   select, button { font: inherit; padding: 6px 12px; border-radius: 8px;
-                   border: 1px solid color-mix(in oklab, CanvasText 20%, transparent);
-                   background: Canvas; color: inherit; cursor: pointer;
+                   border: 1px solid var(--border);
+                   background: var(--bg); color: var(--text); cursor: pointer;
                    white-space: nowrap; }
-  button.danger { border-color: #c0392b; color: #c0392b; min-width: 64px; }
+  select:hover, button:hover { background: var(--hover); }
+  button.danger { border-color: var(--danger); color: var(--danger); min-width: 64px; }
   .switch { position: relative; width: 40px; height: 22px; flex: 0 0 auto; }
   .switch input { display: none; }
   .switch span { position: absolute; inset: 0; border-radius: 11px;
-                 background: color-mix(in oklab, CanvasText 20%, transparent);
+                 background: var(--border);
                  transition: .15s; cursor: pointer; }
   .switch span::after { content: ""; position: absolute; top: 2px; left: 2px;
                         width: 18px; height: 18px; border-radius: 50%;
-                        background: white; transition: .15s; }
-  .switch input:checked + span { background: #2f6feb; }
+                        background: var(--on-accent); transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
   .switch input:checked + span::after { transform: translateX(18px); }
 </style></head><body>
 <div class="container">
   <h1>PureBrowser 设置</h1>
   <iframe id="bridge" style="display:none"></iframe>
+
+  <section>
+    <h2>外观</h2>
+    <div class="row">
+      <label>
+        主题
+        <div class="desc">跟随系统、亮色或暗色</div>
+        <div class="hint">修改后需要重启浏览器</div>
+      </label>
+      <select id="theme" onchange="save('theme', this.value)">
+        <option value="system">跟随系统</option>
+        <option value="light">亮色</option>
+        <option value="dark">暗色</option>
+      </select>
+    </div>
+  </section>
 
   <section>
     <h2>隐私</h2>
@@ -219,20 +258,25 @@ function clearHistory(btn) {
 
 document.getElementById('interceptor').checked = __INTERCEPTOR__;
 document.getElementById('doh').checked = __DOH__;
+document.getElementById('theme').value = "__THEME__";
 </script>
 </body></html>
 """
 
 
-def _history_html(conn) -> str:
+def _history_html(conn, theme=None) -> str:
     rows = [
         {"url": r["url"], "title": r["title"]}
         for r in history_mod.recent(conn, limit=500)
     ]
-    return HISTORY_TEMPLATE.replace("__DATA__", json.dumps(rows, ensure_ascii=False))
+    return (
+        HISTORY_TEMPLATE
+        .replace("__THEME_ROOT__", _theme_root(theme))
+        .replace("__DATA__", json.dumps(rows, ensure_ascii=False))
+    )
 
 
-def _settings_html(settings, data_dir: Path) -> str:
+def _settings_html(settings, data_dir: Path, theme=None) -> str:
     d = settings.all()
     engines = [
         ("bing", "Bing (国内)"),
@@ -253,9 +297,11 @@ def _settings_html(settings, data_dir: Path) -> str:
 
     return (
         SETTINGS_TEMPLATE
+        .replace("__THEME_ROOT__", _theme_root(theme))
         .replace("__ENGINES__", engine_options)
         .replace("__INTERCEPTOR__", "true" if d["interceptor_enabled"] else "false")
         .replace("__DOH__", "true" if d["doh_enabled"] else "false")
+        .replace("__THEME__", str(d.get("theme", "system")))
         .replace("__DATA_DIR__", str(data_dir))
         .replace("__DOWNLOAD_DIR__", download_dir)
         .replace("__CACHE_DIR__", cache_dir)
@@ -263,11 +309,12 @@ def _settings_html(settings, data_dir: Path) -> str:
 
 
 class PureBrowserSchemeHandler(QWebEngineUrlSchemeHandler):
-    def __init__(self, settings, conn, data_dir: Path, parent=None):
+    def __init__(self, settings, conn, data_dir: Path, parent=None, theme=None):
         super().__init__(parent)
         self._settings = settings
         self._conn = conn
         self._data_dir = Path(data_dir)
+        self._theme = theme
         self._buffers: list[QBuffer] = []
 
     def requestStarted(self, job) -> None:
@@ -281,7 +328,7 @@ class PureBrowserSchemeHandler(QWebEngineUrlSchemeHandler):
 
         if host == "history":
             self._serve_bytes(
-                job, _history_html(self._conn).encode("utf-8"), b"text/html"
+                job, _history_html(self._conn, self._theme).encode("utf-8"), b"text/html"
             )
             return
 
@@ -321,7 +368,9 @@ class PureBrowserSchemeHandler(QWebEngineUrlSchemeHandler):
 
             self._serve_bytes(
                 job,
-                _settings_html(self._settings, self._data_dir).encode("utf-8"),
+                _settings_html(self._settings, self._data_dir, self._theme).encode(
+                    "utf-8"
+                ),
                 b"text/html",
             )
             return

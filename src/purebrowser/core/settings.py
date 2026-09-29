@@ -6,6 +6,7 @@ DEFAULTS = {
     "doh_enabled": True,
     "search_engine": "bing",
     "download_dir": "",
+    "theme": "system",  # "system" | "light" | "dark"
 }
 
 SEARCH_ENGINES = {
