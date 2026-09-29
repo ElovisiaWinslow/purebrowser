@@ -25,6 +25,7 @@ class Theme:
     hover: str        # hover 背景
     danger: str       # 危险操作（清除）
     on_accent: str    # 强调色上的文字
+    hover_soft: str = "rgba(0, 0, 0, 0.08)"  # 关闭按钮 hover 背景（带 alpha）
     radius: int = 8   # 组件圆角
     panel: int = 10   # 面板圆角
 
@@ -40,6 +41,7 @@ LIGHT = Theme(
     hover="#E5E5E7",
     danger="#FF3B30",
     on_accent="#FFFFFF",
+    hover_soft="rgba(0, 0, 0, 0.08)",
 )
 
 DARK = Theme(
@@ -53,6 +55,7 @@ DARK = Theme(
     hover="#3A3A3C",
     danger="#FF453A",
     on_accent="#FFFFFF",
+    hover_soft="rgba(255, 255, 255, 0.10)",
 )
 
 
@@ -120,8 +123,12 @@ QTabBar::tab:selected {
     border-bottom: 2px solid $accent;
 }
 QTabBar::tab:hover:!selected { background: $hover; }
-/* 不要给 QTabBar::close-button 设样式：一旦设了子控件规则，Qt 会丢弃
-   样式自带的关闭图标（未提供 image 时 X 不可见）。保留默认绘制即可。 */
+/* 关闭按钮改用 per-tab QToolButton（#tabClose）：本构建的 QSS image+SVG 不渲染，
+   且 B-1.1 已知给 QTabBar::close-button 设样式会丢图标，故不走子控件规则。 */
+QToolButton#tabClose {
+    background: transparent; border: 0; border-radius: 4px;
+}
+QToolButton#tabClose:hover { background: $hover_soft; }
 
 QToolButton#tabPlus {
     background: transparent; border: 0; border-radius: 6px;
@@ -192,6 +199,7 @@ def build_qss(theme: Theme) -> str:
         "hover": theme.hover,
         "danger": theme.danger,
         "on_accent": theme.on_accent,
+        "hover_soft": theme.hover_soft,
         "radius": str(theme.radius),
         "panel": str(theme.panel),
     }

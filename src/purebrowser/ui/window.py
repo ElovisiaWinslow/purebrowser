@@ -4,14 +4,15 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QUrl
-from PyQt6.QtGui import QColor, QKeySequence, QShortcut
+from PyQt6.QtCore import QPoint, QSize, Qt, QUrl
+from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QMainWindow,
     QMenu,
     QProgressBar,
+    QTabBar,
     QTabWidget,
     QToolBar,
     QToolButton,
@@ -142,6 +143,7 @@ class MainWindow(QMainWindow):
         self.conn = connect(self.data_dir / "purebrowser.db")
         self.settings = Settings(settings_file())
         self.theme = theme_mod.resolve_theme(self.settings.get("theme", "system"))
+        self._tab_full_titles: dict = {}
 
         netlog_env = os.environ.get("PUREBROWSER_NETLOG", "").strip()
         netlog_path = Path(netlog_env) if netlog_env else None
@@ -158,7 +160,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget(self)
         self.tabs.setTabBar(AdaptiveTabBar(self.tabs))
-        self.tabs.setTabsClosable(True)
+        self.tabs.setTabsClosable(False)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(False)
@@ -255,7 +257,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.progress)
 
     def _build_tab_plus(self) -> None:
-        """+ 按钮放在 QTabWidget 右上角的 corner 槽位（Chrome 式）。"""
+        """+ 按钮是 self.tabs 的子控件，动态跟随最后一个标签（带上限）。"""
         self.tab_plus = QToolButton(self.tabs)
         self.tab_plus.setObjectName("tabPlus")
         self.tab_plus.setText("")
@@ -265,7 +267,46 @@ class MainWindow(QMainWindow):
         self.tab_plus.setFixedSize(28, 28)
         self.tab_plus.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_plus.clicked.connect(lambda: self.new_tab(NEWTAB_URL))
-        self.tabs.setCornerWidget(self.tab_plus, Qt.Corner.TopRightCorner)
+        bar = self.tabs.tabBar()
+        bar.tabMoved.connect(self._position_tab_plus)
+        bar.currentChanged.connect(self._position_tab_plus)
+        self._position_tab_plus()
+
+    def _install_tab_close(self, tab: Tab) -> None:
+        """给单个标签装自定义关闭按钮（细线 SVG，hover 高亮）。"""
+        bar = self.tabs.tabBar()
+        idx = self.tabs.indexOf(tab)
+        if idx < 0:
+            return
+        btn = QToolButton(bar)
+        btn.setObjectName("tabClose")
+        btn.setIcon(icons.icon("close", self.theme.subtext, 12))
+        btn.setIconSize(QSize(12, 12))
+        btn.setFixedSize(18, 18)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip("关闭标签页")
+        btn.clicked.connect(
+            lambda _=False, t=tab: self._close_tab(self.tabs.indexOf(t))
+        )
+        bar.setTabButton(idx, QTabBar.ButtonPosition.RightSide, btn)
+
+    def _position_tab_plus(self, *_args) -> None:
+        bar = self.tabs.tabBar()
+        bar_pos = bar.mapTo(self.tabs, QPoint(0, 0))
+        n = bar.count()
+        if n <= 0:
+            x_in_bar = 4
+        else:
+            last = bar.tabRect(n - 1)
+            x_in_bar = last.right() + 6
+        max_x_in_bar = bar.width() - self.tab_plus.width() - 4
+        if max_x_in_bar < 0:
+            max_x_in_bar = 0
+        x_in_bar = min(x_in_bar, max_x_in_bar)
+        x = bar_pos.x() + x_in_bar
+        y = bar_pos.y() + (bar.height() - self.tab_plus.height()) // 2
+        self.tab_plus.move(x, y)
+        self.tab_plus.raise_()
 
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(
@@ -343,6 +384,8 @@ class MainWindow(QMainWindow):
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
         self.tabs.tabBar().update()
+        self._elide_tab_titles()
+        self._position_tab_plus()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def _hide_chrome(self) -> None:
@@ -584,6 +627,8 @@ class MainWindow(QMainWindow):
     def new_tab(self, url: QUrl, page: QWebEnginePage = None) -> Tab:
         tab = Tab(self.profile, self, page=page)
         idx = self.tabs.addTab(tab, "新标签页")
+        self._tab_full_titles[tab] = "新标签页"
+        self._install_tab_close(tab)
         self.tabs.setCurrentIndex(idx)
         tab.title_changed.connect(lambda t: self._set_tab_title(tab, t))
         tab.url_changed.connect(lambda u: self._on_url_changed(tab, u))
@@ -594,6 +639,7 @@ class MainWindow(QMainWindow):
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         if page is None:
             tab.load(url)
+        self._position_tab_plus()
         return tab
 
     def _on_new_page_requested(self, page: QWebEnginePage) -> None:
@@ -606,15 +652,31 @@ class MainWindow(QMainWindow):
             return
         w = self.tabs.widget(idx)
         self.tabs.removeTab(idx)
+        self._tab_full_titles.pop(w, None)
         w.deleteLater()
+        self._position_tab_plus()
 
     def _current(self) -> Tab:
         return self.tabs.currentWidget()  # type: ignore[return-value]
 
     def _set_tab_title(self, tab: Tab, title: str) -> None:
-        i = self.tabs.indexOf(tab)
-        if i >= 0:
-            self.tabs.setTabText(i, title[:24] or "新标签页")
+        self._tab_full_titles[tab] = title or "新标签页"
+        self._elide_tab_titles()
+        self._position_tab_plus()
+
+    def _elide_tab_titles(self) -> None:
+        """按当前标签宽度用 QFontMetrics 右侧省略标题（跨平台稳定）。"""
+        bar = self.tabs.tabBar()
+        fm = QFontMetrics(bar.font())
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            full = self._tab_full_titles.get(w)
+            if full is None:
+                continue
+            avail = bar.tabRect(i).width() - 40
+            if avail < 16:
+                avail = 16
+            self.tabs.setTabText(i, fm.elidedText(full, Qt.TextElideMode.ElideRight, avail))
 
     def _on_url_changed(self, tab: Tab, url: QUrl) -> None:
         if tab is self.tabs.currentWidget():

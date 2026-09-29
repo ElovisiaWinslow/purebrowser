@@ -7,14 +7,15 @@ class AdaptiveTabBar(QTabBar):
     MIN_W = 32
     MAX_W = 220
     TAB_H = 38
+    RESERVED = 40  # 给 + 按钮预留（宽 28 + 间隙 12）
 
     def tabSizeHint(self, index: int) -> QSize:
         count = self.count()
         if count == 0:
             return QSize(self.MAX_W, self.TAB_H)
-        avail = self.width()
+        avail = self.width() - self.RESERVED
         if avail <= 0:
-            return QSize(self.MAX_W, self.TAB_H)
+            avail = self.MIN_W
         w = avail // count
         if w > self.MAX_W:
             w = self.MAX_W
