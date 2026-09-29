@@ -65,6 +65,7 @@ if IS_WINDOWS:
     # --- 窗口消息 / 命中测试（方案 B：保留 WS_OVERLAPPEDWINDOW，自绘标题栏） ---
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
+    WM_ERASEBKGND = 0x0014
 
     HTCLIENT = 1
     HTCAPTION = 2
@@ -191,11 +192,21 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._sync_from_tab)
         self.setCentralWidget(self.tabs)
 
-        # 标签栏右侧被 mask 裁掉的区域会露出 QTabWidget 底色，铺成 chrome 避免接缝。
-        pal = self.tabs.palette()
-        pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.chrome))
-        self.tabs.setPalette(pal)
+        # resize 时新露出的区域先用主题底色填充，避免 DWM 合成出现黑边。
+        # 主窗口用内容色（window）；不透明绘制告诉 Qt 直接画、不清屏到透明。
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAutoFillBackground(True)
+        mw_pal = self.palette()
+        mw_pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.window))
+        self.setPalette(mw_pal)
+
+        # QTabWidget 默认透明；填充其底色。用 chrome 而非 window：
+        # 标签栏右侧被 mask 裁掉的区域会露出 QTabWidget 底色，用 chrome 避免接缝；
+        # 内容区（pane）的 window 底色由 QSS `QTabWidget::pane { background: $window }` 提供。
         self.tabs.setAutoFillBackground(True)
+        tabs_pal = self.tabs.palette()
+        tabs_pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.chrome))
+        self.tabs.setPalette(tabs_pal)
 
         self._build_toolbar()
         self._build_title_bar()
@@ -479,6 +490,8 @@ class MainWindow(QMainWindow):
                 msg = wintypes.MSG.from_address(int(message))
                 if msg.message == WM_NCCALCSIZE and msg.wParam:
                     return True, 0  # 客户区铺满整个窗口 → 去掉系统 caption
+                if msg.message == WM_ERASEBKGND:
+                    return True, 1  # 由 Qt 负责重绘背景，禁止系统擦除
                 if msg.message == WM_NCHITTEST:
                     return True, self._native_hit_test(msg)
         except Exception:
