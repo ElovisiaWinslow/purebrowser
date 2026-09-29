@@ -6,7 +6,7 @@ import time
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt
 from PyQt6.QtGui import QIcon, QPixmap
 
-MAX_BYTES = 2048
+MAX_BYTES = 4096
 NORMAL_SIZE = 32
 
 

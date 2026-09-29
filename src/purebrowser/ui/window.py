@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from ctypes import wintypes
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from purebrowser.core.interceptor import Blocker
@@ -44,6 +46,7 @@ from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
 from purebrowser.ui.hud import FindHud, WheelZoomFilter, ZoomHud
+from purebrowser.ui.menu_rows import MenuRow
 from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
@@ -354,6 +357,11 @@ class MainWindow(QMainWindow):
         self._apply_shadow(self.history_menu)
         self._apply_shadow(self.bookmarks_menu)
         self._apply_shadow(self.download_menu)
+
+        # 富行菜单：hover 由 QMenu.hovered 驱动（QWidgetAction 行背景不透明）。
+        self._menu_row_maps = {}
+        for _m in (self.history_menu, self.bookmarks_menu, self.download_menu):
+            _m.hovered.connect(lambda a, m=_m: self._on_menu_hovered(m, a))
 
     @staticmethod
     def _apply_shadow(widget, blur: int = 12, dy: int = 2, alpha: int = 30) -> None:
@@ -1049,41 +1057,120 @@ class MainWindow(QMainWindow):
             self.exit_fullscreen()
 
     # ---------- menus ----------
+    def _on_menu_hovered(self, menu, action) -> None:
+        rows = self._menu_row_maps.get(menu, {})
+        for row in rows.values():
+            row.set_highlight(False)
+        row = rows.get(action)
+        if row is not None:
+            row.set_highlight(True)
+
+    def _submenu(self, parent_menu, label):
+        sub = parent_menu.addMenu(label)
+        self._menu_row_maps[sub] = {}
+        sub.hovered.connect(lambda a, m=sub: self._on_menu_hovered(m, a))
+        self._apply_shadow(sub)
+        return sub
+
+    def _host_icon(self, host: str):
+        if host:
+            pixmap = favicons.get(self.conn, host)
+            if pixmap is not None:
+                return pixmap
+        return self._globe_icon()
+
+    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, handler=None, dim=False):
+        row = MenuRow(self.theme, title, subtitle=subtitle, icon=icon, dim=dim)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(row)
+        menu.addAction(action)
+        if handler is not None and not dim:
+            action.triggered.connect(handler)
+        else:
+            action.setEnabled(False)
+        rows[action] = row
+        return action
+
+    @staticmethod
+    def _human_size(n) -> str:
+        n = float(n or 0)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or unit == "TB":
+                return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+            n /= 1024.0
+        return f"{n:.1f} TB"
+
+    def _download_status(self, rec: dict) -> str:
+        if rec["canceled"]:
+            return "已取消 / 失败"
+        if rec["finished"]:
+            return f"已完成 · {self._human_size(rec['total'])}"
+        received = rec["received"] or 0
+        total = rec["total"] or 0
+        if total > 0:
+            return f"{int(received * 100 / total)}% · {self._human_size(received)}/{self._human_size(total)}"
+        return f"下载中 · {self._human_size(received)}"
+
     def _populate_history_menu(self) -> None:
         self.history_menu.clear()
-        rows = history.recent(self.conn, limit=30)
+        rows_map: dict = {}
+        self._menu_row_maps[self.history_menu] = rows_map
+        rows = history.recent(self.conn, limit=150)
         if not rows:
             a = self.history_menu.addAction("暂无历史记录")
             a.setEnabled(False)
         else:
+            today = date.today()
+            groups = {"今天": [], "昨天": [], "更早": []}
             for r in rows:
-                title = r["title"] or r["url"]
-                if len(title) > 60:
-                    title = title[:57] + "..."
-                action = self.history_menu.addAction(title)
-                url = r["url"]
-                action.triggered.connect(
-                    lambda checked=False, u=url: self._open_in_current_tab(u)
-                )
+                visited = date.fromtimestamp(r["visited_at"])
+                if visited == today:
+                    groups["今天"].append(r)
+                elif visited == today - timedelta(days=1):
+                    groups["昨天"].append(r)
+                else:
+                    groups["更早"].append(r)
+            cap = 40
+            for label in ("今天", "昨天", "更早"):
+                items = groups[label]
+                if not items:
+                    continue
+                sub = self._submenu(self.history_menu, label)
+                sub_map = self._menu_row_maps[sub]
+                for r in items[:cap]:
+                    url = r["url"]
+                    host = r["host"] or (urlparse(url).hostname or "")
+                    self._add_menu_row(
+                        sub,
+                        sub_map,
+                        title=r["title"] or url,
+                        subtitle=host or url,
+                        icon=self._host_icon(host),
+                        handler=lambda checked=False, u=url: self._open_in_current_tab(u),
+                    )
         self.history_menu.addSeparator()
         view_all = self.history_menu.addAction("查看全部历史记录")
         view_all.triggered.connect(lambda: self.new_tab(QUrl("purebrowser://history")))
 
     def _populate_bookmarks_menu(self) -> None:
         self.bookmarks_menu.clear()
+        rows_map: dict = {}
+        self._menu_row_maps[self.bookmarks_menu] = rows_map
         rows = bookmarks.list_all(self.conn)
         if not rows:
             a = self.bookmarks_menu.addAction("暂无书签")
             a.setEnabled(False)
             return
         for r in rows:
-            title = r["title"] or r["url"]
-            if len(title) > 60:
-                title = title[:57] + "..."
-            action = self.bookmarks_menu.addAction(title)
             url = r["url"]
-            action.triggered.connect(
-                lambda checked=False, u=url: self._open_in_current_tab(u)
+            host = urlparse(url).hostname or ""
+            self._add_menu_row(
+                self.bookmarks_menu,
+                rows_map,
+                title=r["title"] or url,
+                subtitle=host or url,
+                icon=self._host_icon(host),
+                handler=lambda checked=False, u=url: self._open_in_current_tab(u),
             )
         self.bookmarks_menu.addSeparator()
         clear_all = self.bookmarks_menu.addAction("清空所有书签")
@@ -1091,25 +1178,42 @@ class MainWindow(QMainWindow):
 
     def _populate_download_menu(self) -> None:
         self.download_menu.clear()
+        rows_map: dict = {}
+        self._menu_row_maps[self.download_menu] = rows_map
         open_folder = self.download_menu.addAction("打开下载文件夹")
         open_folder.triggered.connect(self.downloads.open_folder)
-        self.download_menu.addSeparator()
         if not self.downloads.has_any():
+            self.download_menu.addSeparator()
             a = self.download_menu.addAction("暂无下载")
             a.setEnabled(False)
             return
+        self.download_menu.addSeparator()
+        active, done, failed = [], [], []
         for rec in reversed(self.downloads.records):
-            label = rec["filename"]
             if rec["canceled"]:
-                label += "  ✗"
+                failed.append(rec)
             elif rec["finished"]:
-                label += "  ✓"
+                done.append(rec)
             else:
-                total = rec["total"] or 1
-                pct = int(rec["received"] * 100 / total)
-                label += f"  {pct}%"
-            a = self.download_menu.addAction(label)
-            a.setEnabled(False)
+                active.append(rec)
+        for label, items, icon_name in (
+            ("进行中", active, "download"),
+            ("已完成", done, "file"),
+            ("失败", failed, "alert"),
+        ):
+            if not items:
+                continue
+            sub = self._submenu(self.download_menu, label)
+            sub_map = self._menu_row_maps[sub]
+            for rec in items:
+                self._add_menu_row(
+                    sub,
+                    sub_map,
+                    title=rec["filename"],
+                    subtitle=self._download_status(rec),
+                    icon=icons.icon(icon_name, self.theme.subtext, 20),
+                    dim=True,
+                )
 
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()
