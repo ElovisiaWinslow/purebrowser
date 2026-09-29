@@ -26,6 +26,7 @@ from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
 from purebrowser.pages.pages import PureBrowserSchemeHandler
 from purebrowser.data.storage import connect
+from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
@@ -185,22 +186,26 @@ class MainWindow(QMainWindow):
         self.toolbar.setFixedHeight(46)
         self.addToolBar(self.toolbar)
 
-        self.back = self.toolbar.addAction("←")
+        self.back = self.toolbar.addAction(icons.icon("back", self.theme.text), "")
+        self.back.setToolTip("后退")
         self.back.triggered.connect(lambda: self._current().view.back())
-        self.fwd = self.toolbar.addAction("→")
+        self.fwd = self.toolbar.addAction(icons.icon("forward", self.theme.text), "")
+        self.fwd.setToolTip("前进")
         self.fwd.triggered.connect(lambda: self._current().view.forward())
-        self.reload = self.toolbar.addAction("⟳")
+        self.reload = self.toolbar.addAction(icons.icon("reload", self.theme.text), "")
+        self.reload.setToolTip("刷新")
         self.reload.triggered.connect(lambda: self._current().view.reload())
 
         self.url_bar = UrlBar(self.conn)
         self.url_bar.returnPressed.connect(self._navigate)
         self.toolbar.addWidget(self.url_bar)
 
-        self.bookmark_action = self.toolbar.addAction("☆")
+        self.bookmark_action = self.toolbar.addAction(icons.icon("star", self.theme.text), "")
+        self.bookmark_action.setToolTip("收藏 / 取消收藏")
         self.bookmark_action.triggered.connect(self._toggle_bookmark)
 
         self.history_btn = QToolButton(self)
-        self.history_btn.setText("📜")
+        self.history_btn.setIcon(icons.icon("clock", self.theme.text))
         self.history_btn.setToolTip("历史记录")
         self.history_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.history_menu = QMenu(self.history_btn)
@@ -209,7 +214,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addWidget(self.history_btn)
 
         self.bookmarks_btn = QToolButton(self)
-        self.bookmarks_btn.setText("🔖")
+        self.bookmarks_btn.setIcon(icons.icon("bookmark", self.theme.text))
         self.bookmarks_btn.setToolTip("书签")
         self.bookmarks_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.bookmarks_menu = QMenu(self.bookmarks_btn)
@@ -218,7 +223,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addWidget(self.bookmarks_btn)
 
         self.download_btn = QToolButton(self)
-        self.download_btn.setText("⬇")
+        self.download_btn.setIcon(icons.icon("download", self.theme.text))
         self.download_btn.setToolTip("下载")
         self.download_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.download_menu = QMenu(self.download_btn)
@@ -226,7 +231,8 @@ class MainWindow(QMainWindow):
         self.download_menu.aboutToShow.connect(self._populate_download_menu)
         self.toolbar.addWidget(self.download_btn)
 
-        settings_action = self.toolbar.addAction("⚙")
+        settings_action = self.toolbar.addAction(icons.icon("settings", self.theme.text), "")
+        settings_action.setToolTip("设置")
         settings_action.triggered.connect(self._open_settings)
 
         self._apply_shadow(self.toolbar)
@@ -252,7 +258,9 @@ class MainWindow(QMainWindow):
         """+ 按钮放在 QTabWidget 右上角的 corner 槽位（Chrome 式）。"""
         self.tab_plus = QToolButton(self.tabs)
         self.tab_plus.setObjectName("tabPlus")
-        self.tab_plus.setText("+")
+        self.tab_plus.setText("")
+        self.tab_plus.setIcon(icons.icon("plus", self.theme.subtext, 16))
+        self.tab_plus.setIconSize(QSize(16, 16))
         self.tab_plus.setToolTip("新标签页")
         self.tab_plus.setFixedSize(28, 28)
         self.tab_plus.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -561,7 +569,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()
-        self.download_btn.setText(f"⬇{n}" if n else "⬇")
+        self.download_btn.setIcon(icons.icon("download", self.theme.text))
+        self.download_btn.setText(f" {n}" if n else "")
 
     def _open_in_current_tab(self, url: str) -> None:
         self._current().load(QUrl(url))
@@ -647,9 +656,9 @@ class MainWindow(QMainWindow):
     def _refresh_bookmark_icon(self) -> None:
         url = self._current().current_url().toString()
         if url and bookmarks.is_bookmarked(self.conn, url):
-            self.bookmark_action.setText("★")
+            self.bookmark_action.setIcon(icons.icon("star-fill", self.theme.accent))
         else:
-            self.bookmark_action.setText("☆")
+            self.bookmark_action.setIcon(icons.icon("star", self.theme.text))
 
     # ---------- loading ----------
     def _on_load_started(self) -> None:

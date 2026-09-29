@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QTabBar
 
 
 class AdaptiveTabBar(QTabBar):
-    MIN_W = 60
+    MIN_W = 32
     MAX_W = 220
     TAB_H = 38
 
