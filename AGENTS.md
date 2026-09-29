@@ -311,3 +311,24 @@ PureBrowser 的目标用户是：
 
 *本文件最后更新：2026-09-29*
 *修改本文件需用户明确许可。*
+### 4.6 端到端测试：H.264 可用性
+
+以下改动**必须**额外跑 `tools/e2e_test.py`：
+
+- `src/purebrowser/profile.py`
+- `src/purebrowser/privacy/flags.py`
+- `src/purebrowser/tab.py`
+- `src/purebrowser/window.py`
+- `pyproject.toml` / `requirements.txt` 里的依赖相关部分
+
+命令：
+
+    D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\e2e_test.py
+
+必须输出：
+
+    avc1   : probably
+    [OK]   H.264 可用（avc1 = probably）
+
+若输出 `(不支持)` 或 `[FAIL]`，**立即停止改动**，报告用户。
+这意味着自编译 QtWebEngine 被污染，或某个依赖 DLL 缺失。
