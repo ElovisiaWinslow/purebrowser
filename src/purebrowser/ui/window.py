@@ -637,6 +637,9 @@ class MainWindow(QMainWindow):
 
     def _native_hit_test(self, msg) -> int:
         """屏幕物理坐标 → 窗口本地逻辑坐标后判定命中区（含 150% DPI 换算）。"""
+        # 全屏下不做缩放/拖动/Snap：所有命中交给页面（视频控制栏等仍可交互）。
+        if self._is_fullscreen:
+            return HTCLIENT
         gx = ctypes.c_short(msg.lParam & 0xFFFF).value
         gy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
         wh = self.windowHandle()
@@ -670,12 +673,13 @@ class MainWindow(QMainWindow):
         if bottom:
             return HTBOTTOM
         # 窗口控制键：交给 Qt 处理点击；最大化键在 Win11 返回 HTMAXBUTTON 以触发 Snap。
+        # 只对可见按钮生效（标题条隐藏时不吃命中）。
         for btn in (
             getattr(self, "win_min", None),
             getattr(self, "win_max", None),
             getattr(self, "win_close", None),
         ):
-            if btn is None:
+            if btn is None or not btn.isVisible():
                 continue
             tl = btn.mapTo(self, QPoint(0, 0))
             if QRect(tl, btn.size()).contains(local):
@@ -683,7 +687,7 @@ class MainWindow(QMainWindow):
                     return HTMAXBUTTON
                 return HTCLIENT
         tb = getattr(self, "title_bar", None)
-        if tb is not None and tb.geometry().contains(local):
+        if tb is not None and tb.isVisible() and tb.geometry().contains(local):
             return HTCAPTION
         return HTCLIENT
 
