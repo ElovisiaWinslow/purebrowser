@@ -1153,6 +1153,8 @@ class MainWindow(QMainWindow):
             elif kind == "bookmark":
                 bookmarks.remove(self.conn, meta.get("key"))
                 self._refresh_bookmark_icon()
+            elif kind == "download":
+                self.downloads.remove(meta.get("rec"))
             self._remove_menu_row(menu, action)
             return
         rec = meta.get("rec")

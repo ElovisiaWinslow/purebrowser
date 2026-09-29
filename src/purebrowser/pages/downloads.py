@@ -151,7 +151,18 @@ class DownloadManager(QObject):
         if not p.exists():
             return False
         try:
-            subprocess.Popen(["explorer", "/select," + str(p)])
+            subprocess.Popen(
+                ["explorer", "/select," + str(p)],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             return True
         except OSError:
             return False
+
+    def remove(self, rec: dict) -> None:
+        """从列表移除一条下载记录（仅内存；持久化见 DL-3）。"""
+        try:
+            self.records.remove(rec)
+        except ValueError:
+            return
+        self.changed.emit()
