@@ -35,6 +35,7 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
+from purebrowser.ui.hud import ZoomHud
 from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
@@ -154,6 +155,12 @@ def _fmt_ptr(value) -> str:
     return f"0x{int(value) & 0xFFFFFFFFFFFFFFFF:016X}"
 
 
+# 页面缩放：步长 10%，合法范围 [0.25, 5.0]（越界 Qt 会静默忽略）。
+ZOOM_MIN = 0.25
+ZOOM_MAX = 5.0
+ZOOM_STEP = 1.1
+
+
 class _TitleButton(QToolButton):
     """标题条按钮：可在 hover 时切换图标（如关闭键变白）。"""
 
@@ -270,6 +277,7 @@ class MainWindow(QMainWindow):
         self._freeze_overlay = FreezeOverlay(self.tabs.stack())
 
         self._build_statusbar()
+        self._build_zoom_hud()
         self._build_tab_plus()
         self._install_shortcuts()
 
@@ -463,6 +471,74 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
 
+    def _build_zoom_hud(self) -> None:
+        # 浮层挂在内容 stack 上：全屏时 stack 仍在，缩放指示可见。
+        self.zoom_hud = ZoomHud(self.tabs.stack())
+        self.zoom_hud.step_requested.connect(self._zoom_step)
+        self.zoom_hud.percent_requested.connect(self._zoom_to_percent)
+
+    # ---------- 页面缩放 ----------
+    def _site_zoom(self) -> dict:
+        data = self.settings.get("site_zoom", {})
+        return dict(data) if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _zoom_host(url: QUrl) -> str:
+        return (url.host() or "").lower()
+
+    @staticmethod
+    def _clamp_zoom(factor: float) -> float:
+        return max(ZOOM_MIN, min(ZOOM_MAX, factor))
+
+    def _apply_site_zoom(self, view, url: QUrl) -> None:
+        host = self._zoom_host(url)
+        factor = 1.0
+        if host:
+            try:
+                factor = float(self._site_zoom().get(host, 1.0))
+            except (TypeError, ValueError):
+                factor = 1.0
+        factor = self._clamp_zoom(factor)
+        if abs(view.zoomFactor() - factor) > 1e-6:
+            view.setZoomFactor(factor)
+
+    def _persist_site_zoom(self, url: QUrl, factor: float) -> None:
+        host = self._zoom_host(url)
+        if not host:
+            return
+        data = self._site_zoom()
+        data[host] = factor
+        self.settings.set("site_zoom", data)
+
+    def _zoom_step(self, direction: int) -> None:
+        view = self._current().view
+        factor = view.zoomFactor() * (ZOOM_STEP if direction > 0 else 1.0 / ZOOM_STEP)
+        factor = self._clamp_zoom(round(factor, 3))
+        view.setZoomFactor(factor)
+        self._persist_site_zoom(view.url(), factor)
+        self.zoom_hud.show_percent(factor, 2000)
+
+    def _zoom_to_percent(self, percent: int) -> None:
+        if percent == 100:
+            self._zoom_reset()
+            return
+        factor = self._clamp_zoom(round(percent / 100.0, 3))
+        view = self._current().view
+        view.setZoomFactor(factor)
+        self._persist_site_zoom(view.url(), factor)
+        self.zoom_hud.show_percent(factor, 2000)
+
+    def _zoom_reset(self) -> None:
+        view = self._current().view
+        view.setZoomFactor(1.0)
+        host = self._zoom_host(view.url())
+        if host:
+            data = self._site_zoom()
+            if host in data:
+                del data[host]
+                self.settings.set("site_zoom", data)
+        self.zoom_hud.show_percent(1.0, 2000)
+
     def _make_title_button(self, icon_name, tip, slot, close=False) -> _TitleButton:
         size = 10
         btn = _TitleButton(self.top_row)
@@ -646,6 +722,22 @@ class MainWindow(QMainWindow):
         )
         QShortcut(QKeySequence("F11"), self).activated.connect(self._toggle_fullscreen)
         QShortcut(QKeySequence("Escape"), self).activated.connect(self._handle_escape)
+        QShortcut(QKeySequence("Ctrl++"), self).activated.connect(
+            lambda: self._zoom_step(1)
+        )
+        QShortcut(QKeySequence("Ctrl+="), self).activated.connect(
+            lambda: self._zoom_step(1)
+        )
+        QShortcut(QKeySequence("Ctrl+Shift+="), self).activated.connect(
+            lambda: self._zoom_step(1)
+        )
+        QShortcut(QKeySequence("Ctrl+-"), self).activated.connect(
+            lambda: self._zoom_step(-1)
+        )
+        QShortcut(QKeySequence("Ctrl+Shift+-"), self).activated.connect(
+            lambda: self._zoom_step(-1)
+        )
+        QShortcut(QKeySequence("Ctrl+0"), self).activated.connect(self._zoom_reset)
 
     def _focus_url_bar(self) -> None:
         self.url_bar.setFocus()
@@ -1073,6 +1165,9 @@ class MainWindow(QMainWindow):
         tab.new_page_requested.connect(self._on_new_page_requested)
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         tab.view.page().findTextFinished.connect(self._on_find_result)
+        tab.load_finished.connect(
+            lambda _ok=False, t=tab: self._apply_site_zoom(t.view, t.view.url())
+        )
         if page is None:
             tab.load(url)
         self._relayout_tabs()
@@ -1117,6 +1212,9 @@ class MainWindow(QMainWindow):
             self.tabs.setTabText(i, fm.elidedText(full, Qt.TextElideMode.ElideRight, avail))
 
     def _on_url_changed(self, tab: Tab, url: QUrl) -> None:
+        # 缩放按 page 且跨导航保持，URL 一变就按站点应用（查不到则复位 1.0），
+        # 避免上个站点的缩放泄漏到新站点。
+        self._apply_site_zoom(tab.view, url)
         if tab is self.tabs.currentWidget():
             self.url_bar.setText(display_url(url))
             self.url_bar.setCursorPosition(0)

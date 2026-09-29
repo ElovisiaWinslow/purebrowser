@@ -7,6 +7,7 @@ DEFAULTS = {
     "search_engine": "bing",
     "download_dir": "",
     "theme": "system",  # "system" | "light" | "dark"
+    "site_zoom": {},  # host -> zoom factor, e.g. {"www.bilibili.com": 1.5}
 }
 
 SEARCH_ENGINES = {
