@@ -1,14 +1,16 @@
 import ctypes
 import os
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -69,9 +71,11 @@ if IS_WINDOWS:
     WM_ERASEBKGND = 0x0014
     WM_ENTERSIZEMOVE = 0x0231
     WM_EXITSIZEMOVE = 0x0232
+    WM_NCLBUTTONDOWN = 0x00A1
 
     HTCLIENT = 1
     HTCAPTION = 2
+    HTMAXBUTTON = 8
     HTLEFT = 10
     HTRIGHT = 11
     HTTOP = 12
@@ -80,6 +84,10 @@ if IS_WINDOWS:
     HTBOTTOM = 15
     HTBOTTOMLEFT = 16
     HTBOTTOMRIGHT = 17
+
+    SW_MAXIMIZE = 3
+    SW_MINIMIZE = 6
+    SW_RESTORE = 9
 
     class _WINDOWPLACEMENT(ctypes.Structure):
         _fields_ = [
@@ -134,12 +142,38 @@ if IS_WINDOWS:
         ctypes.c_void_p,
         ctypes.POINTER(_MONITORINFO),
     ]
+    _user32.ShowWindow.restype = wintypes.BOOL
+    _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 
 
 def _fmt_ptr(value) -> str:
     if value is None:
         return "0x0(None)"
     return f"0x{int(value) & 0xFFFFFFFFFFFFFFFF:016X}"
+
+
+class _TitleButton(QToolButton):
+    """标题条按钮：可在 hover 时切换图标（如关闭键变白）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._normal_icon = None
+        self._hover_icon = None
+
+    def set_icons(self, normal, hover=None) -> None:
+        self._normal_icon = normal
+        self._hover_icon = hover
+        self.setIcon(normal)
+
+    def enterEvent(self, event) -> None:
+        if self._hover_icon is not None:
+            self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._normal_icon is not None:
+            self.setIcon(self._normal_icon)
+        super().leaveEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -301,10 +335,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.progress)
 
     def _build_title_bar(self) -> None:
-        """独立自绘标题条（38px，位于工具栏之上）。
-
-        B-2.1a 只提供拖动/缩放命中区；窗口控制按钮在 B-2.1b/c 加入。
-        """
+        """独立自绘标题条（38px，位于工具栏之上）+ 右侧窗口控制键。"""
         self.title_bar = QWidget(self)
         self.title_bar.setObjectName("titleBar")
         self.title_bar.setFixedHeight(38)
@@ -312,7 +343,59 @@ class MainWindow(QMainWindow):
             f"#titleBar {{ background: {self.theme.chrome};"
             f" border-bottom: 1px solid {self.theme.border}; }}"
         )
+        lay = QHBoxLayout(self.title_bar)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addStretch(1)
+
+        self.win_min = self._make_title_button("minimize", "最小化", self.showMinimized)
+        self.win_max = self._make_title_button("maximize", "最大化", self._toggle_maximize)
+        self.win_close = self._make_title_button("close", "关闭", self.close, close=True)
+        lay.addWidget(self.win_min)
+        lay.addWidget(self.win_max)
+        lay.addWidget(self.win_close)
+
         self.setMenuWidget(self.title_bar)
+        self._update_max_icon()
+
+    def _make_title_button(self, icon_name, tip, slot, close=False) -> _TitleButton:
+        size = 10
+        btn = _TitleButton(self.title_bar)
+        btn.setObjectName("winClose" if close else "winBtn")
+        normal = icons.icon(icon_name, self.theme.text, size)
+        hover = icons.icon(icon_name, "#FFFFFF", size) if close else None
+        btn.set_icons(normal, hover)
+        btn.setIconSize(QSize(size, size))
+        btn.setFixedSize(46, 38)
+        btn.setToolTip(tip)
+        btn.clicked.connect(slot)
+        return btn
+
+    def _update_max_icon(self) -> None:
+        if not hasattr(self, "win_max"):
+            return
+        maximized = self.isMaximized()
+        name = "restore" if maximized else "maximize"
+        self.win_max.set_icons(icons.icon(name, self.theme.text, 10), None)
+        self.win_max.setToolTip("还原" if maximized else "最大化")
+
+    @staticmethod
+    def _snap_supported() -> bool:
+        try:
+            return sys.getwindowsversion().build >= 22000
+        except Exception:
+            return False
+
+    def _toggle_maximize(self) -> None:
+        if not IS_WINDOWS:
+            self.showNormal() if self.isMaximized() else self.showMaximized()
+            return
+        hwnd = self._hwnd()
+        if self.isMaximized():
+            _user32.ShowWindow(hwnd, SW_RESTORE)
+        else:
+            _user32.ShowWindow(hwnd, SW_MAXIMIZE)
+        self._update_max_icon()
 
     def _build_tab_plus(self) -> None:
         """+ 按钮是 self.tabs 的子控件，动态跟随最后一个标签（带上限）。"""
@@ -474,6 +557,10 @@ class MainWindow(QMainWindow):
             names.append("NoState(Normal)")
         raw = getattr(state, "value", state)
         self._fs_log(f"windowStateChanged -> {'|'.join(names)} (raw={raw})")
+        try:
+            self._update_max_icon()
+        except Exception:
+            pass
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -508,6 +595,10 @@ class MainWindow(QMainWindow):
                     return True, 0
                 if msg.message == WM_NCHITTEST:
                     return True, self._native_hit_test(msg)
+                if msg.message == WM_NCLBUTTONDOWN and msg.wParam == HTMAXBUTTON:
+                    # Win11：命中最大化键（Snap 弹层用的 HTMAXBUTTON）时点击处理。
+                    self._toggle_maximize()
+                    return True, 0
         except Exception:
             pass
         return False, 0
@@ -575,6 +666,19 @@ class MainWindow(QMainWindow):
             return HTTOP
         if bottom:
             return HTBOTTOM
+        # 窗口控制键：交给 Qt 处理点击；最大化键在 Win11 返回 HTMAXBUTTON 以触发 Snap。
+        for btn in (
+            getattr(self, "win_min", None),
+            getattr(self, "win_max", None),
+            getattr(self, "win_close", None),
+        ):
+            if btn is None:
+                continue
+            tl = btn.mapTo(self, QPoint(0, 0))
+            if QRect(tl, btn.size()).contains(local):
+                if btn is self.win_max and self._snap_supported():
+                    return HTMAXBUTTON
+                return HTCLIENT
         tb = getattr(self, "title_bar", None)
         if tb is not None and tb.geometry().contains(local):
             return HTCAPTION

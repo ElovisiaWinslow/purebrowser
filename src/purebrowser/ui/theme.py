@@ -130,6 +130,14 @@ QToolButton#tabClose {
 }
 QToolButton#tabClose:hover { background: $hover_soft; }
 
+/* 窗口控制按钮（标题条右侧） */
+QToolButton#winBtn, QToolButton#winClose {
+    background: transparent; border: 0; border-radius: 0;
+}
+QToolButton#winBtn:hover { background: $hover; }
+QToolButton#winBtn:pressed { background: $border; }
+QToolButton#winClose:hover { background: #E81123; }
+
 QToolButton#tabPlus {
     background: transparent; border: 0; border-radius: 6px;
     color: $subtext; font-size: 16px; font-weight: 600;
