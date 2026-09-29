@@ -1600,6 +1600,9 @@ class MainWindow(QMainWindow):
             self.tabs.tabBar().setTabIcon(idx, QIcon(pixmap))
 
     def _set_tab_title(self, tab: Tab, title: str) -> None:
+        # 已关闭（deleteLater 期间迟到）的标签不再写缓存，避免字典持有僵尸 key。
+        if self.tabs.indexOf(tab) < 0:
+            return
         self._tab_full_titles[tab] = title or "新标签页"
         self._elide_tab_titles()
         self._position_tab_plus()
@@ -1621,6 +1624,9 @@ class MainWindow(QMainWindow):
             self.tabs.setTabText(i, fm.elidedText(full, Qt.TextElideMode.ElideRight, avail))
 
     def _on_url_changed(self, tab: Tab, url: QUrl) -> None:
+        # 已关闭的标签迟到信号直接忽略（避免僵尸 key 及访问垂死的 view）。
+        if self.tabs.indexOf(tab) < 0:
+            return
         # 缩放按 page 且跨导航保持，URL 一变就按站点应用（查不到则复位 1.0），
         # 避免上个站点的缩放泄漏到新站点。
         self._apply_site_zoom(tab.view, url)
