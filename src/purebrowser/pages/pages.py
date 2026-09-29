@@ -1,3 +1,4 @@
+import base64
 import json
 import shutil
 from pathlib import Path
@@ -9,6 +10,7 @@ from PyQt6.QtWebEngineCore import (
 )
 from PyQt6.QtWidgets import QFileDialog
 
+from purebrowser.data import favicons
 from purebrowser.data import history as history_mod
 from purebrowser.core.locations import default_download_dir, set_data_dir
 
@@ -35,6 +37,9 @@ def _theme_root(theme) -> str:
         f"--hover:{theme.hover};"
         f"--danger:{theme.danger};"
         f"--on-accent:{theme.on_accent};"
+        f"--shadow:{theme.shadow};"
+        f"--radius:{theme.radius}px;"
+        f"--panel-radius:{theme.panel}px;"
         "}"
     )
 
@@ -44,42 +49,118 @@ HISTORY_TEMPLATE = """<!doctype html>
 <title>历史记录</title>
 <style>
   __THEME_ROOT__
+  * { box-sizing: border-box; }
   body { font: 13px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
          background: var(--bg); color: var(--text); }
-  h1 { padding: 20px 24px 8px; font-size: 18px; margin: 0; }
-  ul { list-style: none; margin: 0; padding: 8px 24px 32px; }
-  li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 24px 24px 48px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between;
+          margin-bottom: 12px; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .count { color: var(--subtext); font-size: 12px; }
+  .search { position: sticky; top: 0; z-index: 2; padding: 6px 0 12px;
+            background: var(--bg); }
+  .search input { width: 100%; padding: 10px 14px; font-size: 13px;
+                  color: var(--text); background: var(--panel);
+                  border: 1px solid var(--border); border-radius: var(--radius);
+                  outline: none; }
+  .search input:focus { border-color: var(--accent); }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .item { display: flex; gap: 12px; align-items: center;
+          padding: 9px 12px; margin-bottom: 6px;
+          background: var(--panel); border: 1px solid var(--border);
+          border-radius: var(--radius); }
+  .item:hover { border-color: var(--accent); }
+  .fav { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 5px;
+         object-fit: contain; }
+  .fav.ph { display: inline-flex; align-items: center; justify-content: center;
+            background: var(--border); color: var(--subtext); }
+  .fav.ph svg { width: 14px; height: 14px; }
+  .meta { min-width: 0; flex: 1; }
+  .title { font-weight: 600; white-space: nowrap; overflow: hidden;
+           text-overflow: ellipsis; }
+  .url { opacity: .6; font-size: 12px; margin-top: 2px; color: var(--subtext);
+         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   a { color: inherit; text-decoration: none; display: block; }
-  .title { font-weight: 600; }
-  .url { opacity: .6; font-size: 12px; margin-top: 2px; color: var(--subtext); }
-  .empty { padding: 40px; opacity: .6; text-align: center; }
+  .empty { text-align: center; padding: 80px 20px; color: var(--subtext); }
+  .empty svg { width: 52px; height: 52px; opacity: .45; }
+  .empty .t { font-size: 15px; font-weight: 600; color: var(--text); margin-top: 12px; }
+  .empty .h { font-size: 12px; margin-top: 6px; }
+  .hidden { display: none; }
 </style></head><body>
-<h1>历史记录</h1>
-<div id="root"></div>
+<div class="wrap">
+  <div class="head"><h1>历史记录</h1><span class="count" id="count"></span></div>
+  <div class="search"><input id="q" placeholder="搜索历史记录" autocomplete="off"></div>
+  <div id="empty" class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    <div class="t" id="emptyTitle">暂无历史记录</div>
+    <div class="h" id="emptyHint">浏览过的网页会出现在这里</div>
+  </div>
+  <ul class="list" id="list"></ul>
+</div>
 <script>
 const rows = __DATA__;
-const root = document.getElementById('root');
-if (!rows.length) {
-  root.innerHTML = '<div class="empty">暂无历史记录</div>';
-} else {
-  const ul = document.createElement('ul');
-  for (const r of rows) {
+const list = document.getElementById('list');
+const empty = document.getElementById('empty');
+const countEl = document.getElementById('count');
+
+function globeSvg() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+         'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+         '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>' +
+         '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 ' +
+         '15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+}
+
+function render(filter) {
+  filter = (filter || '').trim().toLowerCase();
+  const shown = filter
+    ? rows.filter(r => (r.title || '').toLowerCase().includes(filter) ||
+                       (r.url || '').toLowerCase().includes(filter))
+    : rows;
+  list.innerHTML = '';
+  for (const r of shown) {
     const li = document.createElement('li');
     const a = document.createElement('a');
+    a.className = 'item';
     a.href = r.url;
+    if (r.icon) {
+      const img = document.createElement('img');
+      img.className = 'fav'; img.src = r.icon; img.alt = '';
+      a.appendChild(img);
+    } else {
+      const d = document.createElement('span');
+      d.className = 'fav ph'; d.innerHTML = globeSvg();
+      a.appendChild(d);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'meta';
     const t = document.createElement('div');
-    t.className = 'title';
-    t.textContent = r.title || r.url;
+    t.className = 'title'; t.textContent = r.title || r.url;
     const u = document.createElement('div');
-    u.className = 'url';
-    u.textContent = r.url;
-    a.appendChild(t);
-    a.appendChild(u);
+    u.className = 'url'; u.textContent = r.url;
+    meta.appendChild(t); meta.appendChild(u);
+    a.appendChild(meta);
     li.appendChild(a);
-    ul.appendChild(li);
+    list.appendChild(li);
   }
-  root.appendChild(ul);
+  const hasRows = rows.length > 0;
+  const hasShown = shown.length > 0;
+  empty.classList.toggle('hidden', hasShown);
+  list.classList.toggle('hidden', !hasShown);
+  if (!hasRows) {
+    document.getElementById('emptyTitle').textContent = '暂无历史记录';
+    document.getElementById('emptyHint').textContent = '浏览过的网页会出现在这里';
+  } else if (!hasShown) {
+    document.getElementById('emptyTitle').textContent = '无匹配结果';
+    document.getElementById('emptyHint').textContent = '换个关键词试试';
+  }
+  countEl.textContent = hasRows ? (shown.length + ' / ' + rows.length) : '';
 }
+
+document.getElementById('q').addEventListener('input', e => render(e.target.value));
+render('');
 </script>
 </body></html>
 """
@@ -89,14 +170,19 @@ SETTINGS_TEMPLATE = """<!doctype html>
 <title>设置</title>
 <style>
   __THEME_ROOT__
+  * { box-sizing: border-box; }
   body { font: 13px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
          background: var(--bg); color: var(--text); }
-  .container { max-width: 760px; margin: 0 auto; padding: 28px 24px; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0 0 20px; }
-  section { margin-bottom: 18px; padding: 16px 18px; border-radius: 10px;
+  .container { max-width: 760px; margin: 0 auto; padding: 28px 24px 48px; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.01em; }
+  section { margin-bottom: 18px; padding: 16px 18px; border-radius: var(--panel-radius);
             background: var(--panel);
-            border: 1px solid var(--border); }
-  h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
+            border: 1px solid var(--border);
+            box-shadow: 0 1px 3px var(--shadow); }
+  h2 { display: flex; align-items: center; gap: 8px;
+       font-size: 15px; font-weight: 600; margin: 0 0 14px; }
+  h2::before { content: ""; width: 8px; height: 8px; border-radius: 3px;
+               background: var(--accent); flex: 0 0 auto; }
   .row { display: flex; align-items: center; justify-content: space-between;
          padding: 10px 0; gap: 16px; }
   .row + .row { border-top: 1px solid var(--border); }
@@ -107,11 +193,13 @@ SETTINGS_TEMPLATE = """<!doctype html>
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hint { opacity: 0.5; font-size: 12px; margin-top: 4px; }
   .btn-group { display: flex; gap: 6px; flex: 0 0 auto; }
-  select, button { font: inherit; padding: 6px 12px; border-radius: 8px;
+  select, button { font: inherit; padding: 6px 12px; border-radius: var(--radius);
                    border: 1px solid var(--border);
                    background: var(--bg); color: var(--text); cursor: pointer;
                    white-space: nowrap; }
   select:hover, button:hover { background: var(--hover); }
+  select:focus, button:focus { outline: none; border-color: var(--accent); }
+  button:active { background: var(--border); }
   button.danger { border-color: var(--danger); color: var(--danger); min-width: 64px; }
   .switch { position: relative; width: 40px; height: 22px; flex: 0 0 auto; }
   .switch input { display: none; }
@@ -280,9 +368,34 @@ document.getElementById('theme').value = "__THEME__";
 """
 
 
+def _favicon_data_uri(conn, host: str) -> str:
+    """把某 host 的缓存 favicon 转成 data URI；无缓存返回空串。"""
+    if not host:
+        return ""
+    pixmap = favicons.get(conn, host)
+    if pixmap is None or pixmap.isNull():
+        return ""
+    data = QByteArray()
+    buf = QBuffer(data)
+    if not buf.open(QIODevice.OpenModeFlag.WriteOnly):
+        return ""
+    try:
+        pixmap.save(buf, "PNG")
+    finally:
+        buf.close()
+    raw = bytes(data)
+    if not raw:
+        return ""
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
 def _history_html(conn, theme=None) -> str:
     rows = [
-        {"url": r["url"], "title": r["title"]}
+        {
+            "url": r["url"],
+            "title": r["title"],
+            "icon": _favicon_data_uri(conn, r["host"] or ""),
+        }
         for r in history_mod.recent(conn, limit=500)
     ]
     return (

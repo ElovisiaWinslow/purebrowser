@@ -26,6 +26,7 @@ class Theme:
     danger: str       # 危险操作（清除）
     on_accent: str    # 强调色上的文字
     hover_soft: str = "rgba(0, 0, 0, 0.08)"  # 关闭按钮 hover 背景（带 alpha）
+    shadow: str = "rgba(0, 0, 0, 0.10)"      # 卡片/浮层阴影色
     radius: int = 8   # 组件圆角
     panel: int = 10   # 面板圆角
 
@@ -42,6 +43,7 @@ LIGHT = Theme(
     danger="#FF3B30",
     on_accent="#FFFFFF",
     hover_soft="rgba(0, 0, 0, 0.08)",
+    shadow="rgba(0, 0, 0, 0.10)",
 )
 
 DARK = Theme(
@@ -56,6 +58,7 @@ DARK = Theme(
     danger="#FF453A",
     on_accent="#FFFFFF",
     hover_soft="rgba(255, 255, 255, 0.10)",
+    shadow="rgba(0, 0, 0, 0.45)",
 )
 
 
@@ -102,33 +105,37 @@ QToolBar QToolButton {
     background: transparent; border: 0;
     min-width: 32px; min-height: 32px;
     padding: 6px 10px; margin: 0 2px;
-    border-radius: 6px; font-size: 15px; color: $text;
+    border-radius: $radius; font-size: 15px; color: $text;
 }
-QToolButton { color: $text; border-radius: 6px; }
+QToolBar QToolButton:hover { background: $hover; }
+QToolBar QToolButton:pressed { background: $border; }
+QToolButton { color: $text; border-radius: $radius; background: transparent; border: 0; }
 QToolButton:hover { background: $hover; }
-QToolButton:pressed, QToolButton:checked { background: $border; }
+QToolButton:pressed { background: $border; }
+QToolButton:checked { background: $hover_soft; }
+QToolButton:disabled { color: $subtext; }
 QToolButton::menu-indicator { image: none; }
 
 QTabWidget::pane { border: 0; background: $window; }
 QTabBar { background: $chrome; qproperty-drawBase: 0; }
 QTabBar::tab {
-    background: transparent; color: $subtext; border: 0;
+    background: transparent; color: $subtext; border: 1px solid transparent;
     height: 30px; min-width: 120px; max-width: 220px;
-    padding: 0 12px; margin: 4px 2px 0 2px;
-    border-top-left-radius: 12px; border-top-right-radius: 12px;
+    padding: 0 12px; margin: 4px 3px;
+    border-radius: $panel;
     font-size: 12px; font-weight: 500;
 }
 QTabBar::tab:selected {
-    background: $window; color: $text;
-    border-bottom: 2px solid $accent;
+    background: $window; color: $text; border: 1px solid $border;
 }
 QTabBar::tab:hover:!selected { background: $hover; }
 /* 关闭按钮改用 per-tab QToolButton（#tabClose）：本构建的 QSS image+SVG 不渲染，
    且 B-1.1 已知给 QTabBar::close-button 设样式会丢图标，故不走子控件规则。 */
 QToolButton#tabClose {
-    background: transparent; border: 0; border-radius: 4px;
+    background: transparent; border: 0; border-radius: 9px;
 }
 QToolButton#tabClose:hover { background: $hover_soft; }
+QToolButton#tabClose:pressed { background: $border; }
 
 /* 窗口控制按钮（标题条右侧） */
 QToolButton#winBtn, QToolButton#winClose {
@@ -147,10 +154,13 @@ QToolButton#tabPlus:hover { background: $hover; color: $text; }
 QLineEdit {
     background: $window; color: $text;
     border: 1px solid $border; border-radius: $radius; padding: 5px 10px;
+    font-size: 13px;
     selection-background-color: $accent; selection-color: $on_accent;
 }
 QLineEdit:hover { border-color: $subtext; }
 QLineEdit:focus { border: 1px solid $accent; }
+QLineEdit:disabled { color: $subtext; background: $chrome; }
+QLineEdit#urlBar { padding: 6px 14px; }
 
 QMenu {
     background: $chrome; color: $text;

@@ -1224,14 +1224,29 @@ class MainWindow(QMainWindow):
             return f"{int(received * 100 / total)}% · {self._human_size(received)}/{self._human_size(total)}"
         return f"下载中 · {self._human_size(received)}"
 
+    def _add_empty_state(self, menu, icon_name: str, title: str, hint: str) -> None:
+        """统一的空态行：图标 + 主标题 + 引导句（不可点击）。"""
+        row = MenuRow(
+            self.theme,
+            title,
+            subtitle=hint,
+            icon=icons.icon(icon_name, self.theme.subtext, 20),
+            dim=True,
+        )
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(row)
+        action.setEnabled(False)
+        menu.addAction(action)
+
     def _populate_history_menu(self) -> None:
         self.history_menu.clear()
         rows_map: dict = {}
         self.history_menu._row_map = rows_map
         rows = history.recent(self.conn, limit=150)
         if not rows:
-            a = self.history_menu.addAction("暂无历史记录")
-            a.setEnabled(False)
+            self._add_empty_state(
+                self.history_menu, "clock", "暂无历史记录", "浏览过的网页会出现在这里"
+            )
         else:
             today = date.today()
             groups = {"今天": [], "昨天": [], "更早": []}
@@ -1273,8 +1288,9 @@ class MainWindow(QMainWindow):
         self.bookmarks_menu._row_map = rows_map
         rows = bookmarks.list_all(self.conn)
         if not rows:
-            a = self.bookmarks_menu.addAction("暂无书签")
-            a.setEnabled(False)
+            self._add_empty_state(
+                self.bookmarks_menu, "bookmark", "暂无书签", "点击地址栏星标即可收藏"
+            )
             return
         for r in rows:
             url = r["url"]
@@ -1311,8 +1327,9 @@ class MainWindow(QMainWindow):
 
         if not entries:
             self.download_menu.addSeparator()
-            a = self.download_menu.addAction("暂无下载")
-            a.setEnabled(False)
+            self._add_empty_state(
+                self.download_menu, "download", "暂无下载", "下载的文件会显示在这里"
+            )
             return
         self.download_menu.addSeparator()
 

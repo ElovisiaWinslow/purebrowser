@@ -12,35 +12,48 @@
     --accent: #007AFF;
     --border: #D2D2D7;
     --on-accent: #FFFFFF;
+    --shadow: rgba(0, 0, 0, 0.10);
     --radius: 8px;
     --panel-radius: 10px;
   }
   /* __THEME_VARS__ */
+  * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     display: grid; place-items: center;
-    font: 16px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
-    background: var(--bg); color: var(--text);
+    font: 15px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    background: radial-gradient(circle at 50% 26%, var(--panel), var(--bg) 64%);
+    color: var(--text);
   }
-  form { display: flex; gap: 8px; width: min(640px, 80vw); }
+  main { text-align: center; width: min(680px, 84vw); }
+  h1 {
+    font-weight: 650; font-size: 34px; letter-spacing: -0.02em;
+    margin: 0 0 26px;
+  }
+  form { display: flex; gap: 10px; width: 100%; }
   input {
-    flex: 1; padding: 14px 16px; border-radius: var(--radius);
+    flex: 1; padding: 14px 18px; border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--panel);
-    color: var(--text); font-size: 16px; outline: none;
+    color: var(--text); font-size: 15px; outline: none;
+    box-shadow: 0 1px 3px var(--shadow);
   }
   input::placeholder { color: var(--subtext); }
-  input:focus { border-color: var(--accent); }
+  input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--shadow);
+  }
   button {
-    padding: 0 18px; border-radius: var(--radius); border: 0;
-    background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer;
+    padding: 0 22px; border-radius: var(--radius); border: 0;
+    background: var(--accent); color: var(--on-accent); font-weight: 600;
+    font-size: 15px; cursor: pointer;
   }
   button:hover { filter: brightness(0.95); }
-  h1 { font-weight: 600; letter-spacing: -0.02em; margin-bottom: 24px; }
+  button:active { filter: brightness(0.9); }
 </style>
 </head>
 <body>
-  <main style="text-align:center">
+  <main>
     <h1>PureBrowser</h1>
     <form onsubmit="event.preventDefault(); const q=this.q.value.trim();
       if(!q) return false;
