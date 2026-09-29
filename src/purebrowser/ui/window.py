@@ -180,6 +180,8 @@ class MainWindow(QMainWindow):
 
         self.new_tab(NEWTAB_URL)
 
+        self._sync_tab_visibility()
+
     # ---------- UI ----------
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar("Main", self)
@@ -290,15 +292,31 @@ class MainWindow(QMainWindow):
         )
         bar.setTabButton(idx, QTabBar.ButtonPosition.RightSide, btn)
 
+    def _sync_tab_visibility(self) -> None:
+        """根据可用宽度决定显示多少个标签，多余隐藏（缩到 MIN_W 即停）。"""
+        bar = self.tabs.tabBar()
+        n = self.tabs.count()
+        if n == 0:
+            return
+        avail = bar.width() - AdaptiveTabBar.RESERVED
+        if avail < AdaptiveTabBar.MIN_W:
+            max_visible = 1
+        else:
+            max_visible = max(1, avail // AdaptiveTabBar.MIN_W)
+        for i in range(n):
+            bar.setTabVisible(i, i < max_visible)
+
     def _position_tab_plus(self, *_args) -> None:
         bar = self.tabs.tabBar()
         bar_pos = bar.mapTo(self.tabs, QPoint(0, 0))
-        n = bar.count()
-        if n <= 0:
+        last_visible = -1
+        for i in range(bar.count()):
+            if bar.isTabVisible(i):
+                last_visible = i
+        if last_visible < 0:
             x_in_bar = 4
         else:
-            last = bar.tabRect(n - 1)
-            x_in_bar = last.right() + 6
+            x_in_bar = bar.tabRect(last_visible).right() + 6
         max_x_in_bar = bar.width() - self.tab_plus.width() - 4
         if max_x_in_bar < 0:
             max_x_in_bar = 0
@@ -384,6 +402,7 @@ class MainWindow(QMainWindow):
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
         self.tabs.tabBar().update()
+        self._sync_tab_visibility()
         self._elide_tab_titles()
         self._position_tab_plus()
 
@@ -639,6 +658,7 @@ class MainWindow(QMainWindow):
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         if page is None:
             tab.load(url)
+        self._sync_tab_visibility()
         self._position_tab_plus()
         return tab
 
@@ -654,6 +674,7 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(idx)
         self._tab_full_titles.pop(w, None)
         w.deleteLater()
+        self._sync_tab_visibility()
         self._position_tab_plus()
 
     def _current(self) -> Tab:
@@ -669,6 +690,8 @@ class MainWindow(QMainWindow):
         bar = self.tabs.tabBar()
         fm = QFontMetrics(bar.font())
         for i in range(self.tabs.count()):
+            if not bar.isTabVisible(i):
+                continue
             w = self.tabs.widget(i)
             full = self._tab_full_titles.get(w)
             if full is None:

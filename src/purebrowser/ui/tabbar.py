@@ -1,13 +1,16 @@
-"""自适应等宽标签栏：所有标签等宽，宽度在 [HARD_W, MAX_W] 之间。"""
+"""自适应等宽标签栏：所有标签等宽，宽度在 [MIN_W, MAX_W] 之间。
+
+溢出时不再继续缩小，而是由 MainWindow._sync_tab_visibility() 隐藏多余标签。
+"""
 from PyQt6.QtCore import QSize
 from PyQt6.QtWidgets import QTabBar
 
 
 class AdaptiveTabBar(QTabBar):
-    HARD_W = 8        # 真正的最小宽度，只防 w = 0
+    MIN_W = 32
     MAX_W = 220
     TAB_H = 38
-    RESERVED = 40     # 给 + 按钮预留（宽 28 + 间隙 12）
+    RESERVED = 40  # 给 + 按钮预留（宽 28 + 间隙 12）
 
     def tabSizeHint(self, index: int) -> QSize:
         count = self.count()
@@ -19,13 +22,13 @@ class AdaptiveTabBar(QTabBar):
         w = avail // count
         if w > self.MAX_W:
             w = self.MAX_W
-        if w < self.HARD_W:
-            w = self.HARD_W
+        if w < self.MIN_W:
+            w = self.MIN_W
         return QSize(w, self.TAB_H)
 
     def minimumTabSizeHint(self, index: int) -> QSize:
-        return QSize(self.HARD_W, self.TAB_H)
+        return QSize(self.MIN_W, self.TAB_H)
 
     def minimumSizeHint(self) -> QSize:
-        # 控制标签栏自身的最小宽度：不随标签数增长，否则溢出时会把 TopRightCorner / + 顶出窗口。
-        return QSize(self.HARD_W, self.TAB_H)
+        # 不随标签数增长，避免溢出时把 + 顶出窗口。
+        return QSize(self.MIN_W, self.TAB_H)
