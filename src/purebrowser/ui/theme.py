@@ -120,7 +120,14 @@ QTabBar::tab:selected {
     border-bottom: 2px solid $accent;
 }
 QTabBar::tab:hover:!selected { background: $hover; }
-QTabBar::close-button { background: transparent; }
+/* 不要给 QTabBar::close-button 设样式：一旦设了子控件规则，Qt 会丢弃
+   样式自带的关闭图标（未提供 image 时 X 不可见）。保留默认绘制即可。 */
+
+QToolButton#tabPlus {
+    background: transparent; border: 0; border-radius: 6px;
+    color: $subtext; font-size: 16px; font-weight: 600;
+}
+QToolButton#tabPlus:hover { background: $hover; color: $text; }
 
 QLineEdit {
     background: $window; color: $text;

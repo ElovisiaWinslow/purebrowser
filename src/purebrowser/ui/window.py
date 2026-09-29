@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_statusbar()
+        self._build_tab_plus()
         self._install_shortcuts()
 
         self.new_tab(NEWTAB_URL)
@@ -222,9 +223,6 @@ class MainWindow(QMainWindow):
         self.download_menu.aboutToShow.connect(self._populate_download_menu)
         self.toolbar.addWidget(self.download_btn)
 
-        new_tab = self.toolbar.addAction("+")
-        new_tab.triggered.connect(lambda: self.new_tab(NEWTAB_URL))
-
         settings_action = self.toolbar.addAction("⚙")
         settings_action.triggered.connect(self._open_settings)
 
@@ -246,6 +244,34 @@ class MainWindow(QMainWindow):
         self.progress.setMaximumWidth(160)
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
+
+    def _build_tab_plus(self) -> None:
+        """+ 按钮挂在 QTabBar 上，紧贴最后一个标签页右侧。"""
+        bar = self.tabs.tabBar()
+        self.tab_plus = QToolButton(bar)
+        self.tab_plus.setObjectName("tabPlus")
+        self.tab_plus.setText("+")
+        self.tab_plus.setToolTip("新标签页")
+        self.tab_plus.setFixedSize(28, 28)
+        self.tab_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tab_plus.clicked.connect(lambda: self.new_tab(NEWTAB_URL))
+        bar.tabMoved.connect(self._position_tab_plus)
+        bar.currentChanged.connect(self._position_tab_plus)
+        self._position_tab_plus()
+
+    def _position_tab_plus(self, *_args) -> None:
+        bar = self.tabs.tabBar()
+        n = bar.count()
+        if n <= 0:
+            x = 4
+        else:
+            r = bar.tabRect(n - 1)
+            x = r.right() + 6
+        y = max(0, (bar.height() - self.tab_plus.height()) // 2)
+        max_x = bar.width() - self.tab_plus.width() - 2
+        if max_x > 0:
+            x = min(x, max_x)
+        self.tab_plus.move(max(2, x), y)
 
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(
@@ -322,6 +348,8 @@ class MainWindow(QMainWindow):
         self._fs_log(
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
+        if getattr(self, "tab_plus", None) is not None:
+            self._position_tab_plus()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def _hide_chrome(self) -> None:
@@ -572,6 +600,7 @@ class MainWindow(QMainWindow):
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         if page is None:
             tab.load(url)
+        self._position_tab_plus()
         return tab
 
     def _on_new_page_requested(self, page: QWebEnginePage) -> None:
@@ -585,6 +614,7 @@ class MainWindow(QMainWindow):
         w = self.tabs.widget(idx)
         self.tabs.removeTab(idx)
         w.deleteLater()
+        self._position_tab_plus()
 
     def _current(self) -> Tab:
         return self.tabs.currentWidget()  # type: ignore[return-value]
@@ -593,6 +623,7 @@ class MainWindow(QMainWindow):
         i = self.tabs.indexOf(tab)
         if i >= 0:
             self.tabs.setTabText(i, title[:24] or "新标签页")
+            self._position_tab_plus()
 
     def _on_url_changed(self, tab: Tab, url: QUrl) -> None:
         if tab is self.tabs.currentWidget():
