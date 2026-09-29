@@ -11,8 +11,6 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
-    QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QProgressBar,
@@ -35,7 +33,7 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
-from purebrowser.ui.hud import WheelZoomFilter, ZoomHud
+from purebrowser.ui.hud import FindHud, WheelZoomFilter, ZoomHud
 from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
@@ -260,16 +258,14 @@ class MainWindow(QMainWindow):
         top_lay.addWidget(self.win_max)
         top_lay.addWidget(self.win_close)
 
-        # 中央容器：top_row / toolbar / find_bar / 内容 stack（自上而下）。
+        # 中央容器：top_row / toolbar / 内容 stack（自上而下）。
         self._build_toolbar()
-        self._build_find_bar()
         central = QWidget(self)
         central_lay = QVBoxLayout(central)
         central_lay.setContentsMargins(0, 0, 0, 0)
         central_lay.setSpacing(0)
         central_lay.addWidget(self.top_row)
         central_lay.addWidget(self.toolbar)
-        central_lay.addWidget(self.find_bar)
         central_lay.addWidget(self.tabs.stack(), 1)
         self.setCentralWidget(central)
 
@@ -278,6 +274,7 @@ class MainWindow(QMainWindow):
 
         self._build_statusbar()
         self._build_zoom_hud()
+        self._build_find_hud()
         self._build_tab_plus()
         self._install_shortcuts()
 
@@ -355,77 +352,29 @@ class MainWindow(QMainWindow):
         effect.setColor(QColor(0, 0, 0, alpha))
         widget.setGraphicsEffect(effect)
 
-    def _build_find_bar(self) -> None:
-        """工具栏下方的查找条（Ctrl+F）。默认隐藏，仅在命中时出现。"""
-        self.find_bar = QWidget(self)
-        self.find_bar.setObjectName("findBar")
-        self.find_bar.setFixedHeight(36)
-        self.find_bar.setStyleSheet(
-            f"#findBar {{ background: {self.theme.chrome};"
-            f" border-bottom: 1px solid {self.theme.border}; }}"
-        )
-        lay = QHBoxLayout(self.find_bar)
-        lay.setContentsMargins(10, 2, 10, 2)
-        lay.setSpacing(6)
-
-        self.find_input = QLineEdit(self.find_bar)
-        self.find_input.setPlaceholderText("在页面中查找")
-        self.find_input.setMinimumHeight(26)
-        self.find_input.setMaximumWidth(320)
-        self.find_input.textChanged.connect(self._on_find_text_changed)
-        self.find_input.returnPressed.connect(self._find_next)
-        lay.addWidget(self.find_input)
-
-        self.find_prev = QToolButton(self.find_bar)
-        self.find_prev.setText("↑")
-        self.find_prev.setToolTip("上一个")
-        self.find_prev.setFixedSize(28, 28)
-        self.find_prev.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.find_prev.clicked.connect(self._find_prev)
-        lay.addWidget(self.find_prev)
-
-        self.find_next = QToolButton(self.find_bar)
-        self.find_next.setText("↓")
-        self.find_next.setToolTip("下一个")
-        self.find_next.setFixedSize(28, 28)
-        self.find_next.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.find_next.clicked.connect(self._find_next)
-        lay.addWidget(self.find_next)
-
-        self.find_count = QLabel("0/0", self.find_bar)
-        self.find_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.find_count.setMinimumWidth(44)
-        self.find_count.setStyleSheet(f"color: {self.theme.subtext};")
-        lay.addWidget(self.find_count)
-
-        self.find_close = QToolButton(self.find_bar)
-        self.find_close.setText("×")
-        self.find_close.setToolTip("关闭")
-        self.find_close.setFixedSize(28, 28)
-        self.find_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.find_close.clicked.connect(self._hide_find_bar)
-        lay.addWidget(self.find_close)
-
-        lay.addStretch(1)
-        self.find_bar.hide()
+    def _build_find_hud(self) -> None:
+        """查找条改为右上角浮层（复用一个 FloatingHud），不再挤动页面布局。"""
+        self.find_hud = FindHud(self.tabs.stack())
+        self.find_hud.text_changed.connect(self._on_find_text_changed)
+        self.find_hud.next_requested.connect(self._find_next)
+        self.find_hud.prev_requested.connect(self._find_prev)
+        self.find_hud.close_requested.connect(self._hide_find_bar)
 
     def _show_find_bar(self) -> None:
-        self.find_bar.show()
-        self.find_input.setFocus()
-        self.find_input.selectAll()
-        text = self.find_input.text()
+        self.find_hud.open()
+        text = self.find_hud.input.text()
         if text:
             self._on_find_text_changed(text)
 
     def _hide_find_bar(self) -> None:
-        if not self.find_bar.isVisible():
+        if not self.find_hud.isVisible():
             return
-        self.find_bar.hide()
-        self.find_input.clear()
+        self.find_hud.hide()
+        self.find_hud.input.clear()
         page = self._current().view.page()
         if page is not None:
             page.findText("")
-        self.find_count.setText("0/0")
+        self.find_hud.set_count("0/0")
 
     def _on_find_text_changed(self, text: str) -> None:
         page = self._current().view.page()
@@ -433,12 +382,12 @@ class MainWindow(QMainWindow):
             return
         if not text:
             page.findText("")
-            self.find_count.setText("0/0")
+            self.find_hud.set_count("0/0")
             return
         page.findText(text)
 
     def _find_next(self) -> None:
-        text = self.find_input.text()
+        text = self.find_hud.input.text()
         if not text:
             return
         page = self._current().view.page()
@@ -446,7 +395,7 @@ class MainWindow(QMainWindow):
             page.findText(text)
 
     def _find_prev(self) -> None:
-        text = self.find_input.text()
+        text = self.find_hud.input.text()
         if not text:
             return
         page = self._current().view.page()
@@ -456,11 +405,11 @@ class MainWindow(QMainWindow):
     def _on_find_result(self, result) -> None:
         total = result.numberOfMatches()
         active = result.activeMatch()
-        self.find_count.setText("0/0" if total <= 0 else f"{active}/{total}")
+        self.find_hud.set_count("0/0" if total <= 0 else f"{active}/{total}")
 
     def _handle_escape(self) -> None:
-        """Esc 优先级：先关查找条，否则走原有退出全屏逻辑。"""
-        if self.find_bar.isVisible():
+        """Esc 优先级：先关查找浮层，否则走原有退出全屏逻辑。"""
+        if self.find_hud.isVisible():
             self._hide_find_bar()
             return
         self._exit_fullscreen()
@@ -476,6 +425,7 @@ class MainWindow(QMainWindow):
         self.zoom_hud = ZoomHud(self.tabs.stack())
         self.zoom_hud.step_requested.connect(self._zoom_step)
         self.zoom_hud.percent_requested.connect(self._zoom_to_percent)
+        self.zoom_hud.reset_requested.connect(self._zoom_reset)
         # Ctrl+滚轮桥接到 _zoom_step。滚轮事件落点是 view 的 focusProxy，
         # 但 focusProxy 在 view 首次显示后才存在且可能被替换，故按需安装。
         self._wheel_filter = WheelZoomFilter(self._zoom_step)
@@ -936,10 +886,6 @@ class MainWindow(QMainWindow):
         self.top_row.hide()
         self.toolbar.hide()
         self.statusBar().hide()
-        # 进入全屏时收起查找条（含 findText("") 清高亮）；退出后不自动恢复，
-        # 用户需要时再按 Ctrl+F。_show_chrome 故意不 show find_bar。
-        if self.find_bar.isVisible():
-            self._hide_find_bar()
 
     def _show_chrome(self) -> None:
         self.top_row.show()
@@ -1243,8 +1189,8 @@ class MainWindow(QMainWindow):
             self.url_bar.setCursorPosition(0)
 
     def _sync_from_tab(self, _idx: int) -> None:
-        # 切换标签后旧高亮已无意义，自动收起查找条。
-        if getattr(self, "find_bar", None) is not None and self.find_bar.isVisible():
+        # 切换标签后旧高亮已无意义，自动收起查找浮层。
+        if getattr(self, "find_hud", None) is not None and self.find_hud.isVisible():
             self._hide_find_bar()
         tab = self.tabs.currentWidget()
         if isinstance(tab, Tab):

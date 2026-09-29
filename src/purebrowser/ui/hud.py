@@ -9,15 +9,17 @@ ZoomHud 目前的使用者；后续查找条可复用 FloatingHud（commit B）�
 - show_briefly(ms) 显示后定时隐藏；鼠标悬停时暂停，离开后重新计时。
 """
 from PyQt6.QtCore import QElapsedTimer, QEvent, QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QToolButton, QWidget
 
-_ZOOM_QSS = """
-#zoomHud {
+def _capsule_qss(root: str) -> str:
+    """深色半透明胶囊样式：ZoomHud / FindHud 共用，保证外观一致。"""
+    return f"""
+#{root} {{
     background: rgba(24, 24, 26, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 10px;
-}
-#zoomHud QToolButton {
+}}
+#{root} QToolButton {{
     color: #FFFFFF;
     background: transparent;
     border: 0;
@@ -27,24 +29,43 @@ _ZOOM_QSS = """
     padding: 0;
     font-size: 15px;
     font-weight: 600;
-}
-#zoomHud QToolButton:hover { background: rgba(255, 255, 255, 0.18); }
-#zoomHud QToolButton:pressed { background: rgba(255, 255, 255, 0.30); }
+}}
+#{root} QToolButton:hover {{ background: rgba(255, 255, 255, 0.18); }}
+#{root} QToolButton:pressed {{ background: rgba(255, 255, 255, 0.30); }}
+#{root} QLabel {{ color: #FFFFFF; font-size: 12px; }}
+#{root} QLineEdit {{
+    color: #FFFFFF;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.36);
+    border-radius: 6px;
+    font-size: 13px;
+    padding: 2px 8px;
+    selection-background-color: rgba(255, 255, 255, 0.35);
+    selection-color: #FFFFFF;
+}}
+"""
+
+
+_ZOOM_QSS = _capsule_qss("zoomHud") + """
 #zoomHud #hudPercent {
     font-size: 13px;
     min-width: 48px;
     padding: 0 4px;
 }
 #zoomHud #hudEditor {
-    color: #FFFFFF;
-    background: rgba(255, 255, 255, 0.14);
-    border: 1px solid rgba(255, 255, 255, 0.40);
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
     min-width: 48px;
     max-width: 56px;
     padding: 2px 4px;
+}
+"""
+
+_FIND_QSS = _capsule_qss("findHud") + """
+#findHud #findInput {
+    min-width: 200px;
+    max-width: 280px;
+}
+#findHud #findCount {
+    min-width: 44px;
 }
 """
 
@@ -55,6 +76,7 @@ class FloatingHud(QWidget):
         self._anchor = anchor
         self._margin = int(margin)
         self._hovered = False
+        self._autohide_enabled = False
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.hide()
 
@@ -71,10 +93,19 @@ class FloatingHud(QWidget):
         )
 
     def show_briefly(self, ms: int = 2000) -> None:
+        self._autohide_enabled = True
         self._reposition()
         self.show()
         self.raise_()
         self._autohide.start(ms)
+
+    def show_persistent(self) -> None:
+        """常驻显示，不自动隐藏（鼠标移出也不会触发隐藏）。"""
+        self._autohide_enabled = False
+        self._autohide.stop()
+        self._reposition()
+        self.show()
+        self.raise_()
 
     def _on_autohide(self) -> None:
         if self._hovered:
@@ -114,7 +145,7 @@ class FloatingHud(QWidget):
 
     def leaveEvent(self, event) -> None:
         self._hovered = False
-        if self.isVisible():
+        if self.isVisible() and self._autohide_enabled:
             self._autohide.start(2000)
         super().leaveEvent(event)
 
@@ -122,6 +153,7 @@ class FloatingHud(QWidget):
 class ZoomHud(FloatingHud):
     step_requested = pyqtSignal(int)
     percent_requested = pyqtSignal(int)
+    reset_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent, anchor="bottom-right", margin=16)
@@ -163,6 +195,13 @@ class ZoomHud(FloatingHud):
         self._plus.clicked.connect(lambda: self.step_requested.emit(1))
         lay.addWidget(self._plus)
 
+        self._reset = QToolButton(self)
+        self._reset.setText("\u27F2")
+        self._reset.setToolTip("重置为 100%")
+        self._reset.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._reset.clicked.connect(lambda: self.reset_requested.emit())
+        lay.addWidget(self._reset)
+
     def show_percent(self, factor: float, ms: int = 2000) -> None:
         self._end_edit()
         self._percent = int(round(factor * 100))
@@ -192,6 +231,65 @@ class ZoomHud(FloatingHud):
     def _end_edit(self) -> None:
         self._editor.setVisible(False)
         self._percent_btn.setVisible(True)
+
+
+class FindHud(FloatingHud):
+    """页面内查找浮层（Ctrl+F），右上角常驻，复用胶囊外观。"""
+
+    text_changed = pyqtSignal(str)
+    next_requested = pyqtSignal()
+    prev_requested = pyqtSignal()
+    close_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent, anchor="top-right", margin=16)
+        self.setObjectName("findHud")
+        self.setStyleSheet(_FIND_QSS)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setSpacing(2)
+
+        self.input = QLineEdit(self)
+        self.input.setObjectName("findInput")
+        self.input.setPlaceholderText("在页面中查找")
+        self.input.textChanged.connect(self.text_changed)
+        self.input.returnPressed.connect(self.next_requested)
+        lay.addWidget(self.input)
+
+        self.count = QLabel("0/0", self)
+        self.count.setObjectName("findCount")
+        self.count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.count)
+
+        self.prev_btn = QToolButton(self)
+        self.prev_btn.setText("\u2191")
+        self.prev_btn.setToolTip("上一个")
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_btn.clicked.connect(lambda: self.prev_requested.emit())
+        lay.addWidget(self.prev_btn)
+
+        self.next_btn = QToolButton(self)
+        self.next_btn.setText("\u2193")
+        self.next_btn.setToolTip("下一个")
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_btn.clicked.connect(lambda: self.next_requested.emit())
+        lay.addWidget(self.next_btn)
+
+        self.close_btn = QToolButton(self)
+        self.close_btn.setText("\u00D7")
+        self.close_btn.setToolTip("关闭")
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.clicked.connect(lambda: self.close_requested.emit())
+        lay.addWidget(self.close_btn)
+
+    def open(self) -> None:
+        self.show_persistent()
+        self.input.setFocus()
+        self.input.selectAll()
+
+    def set_count(self, text: str) -> None:
+        self.count.setText(text)
 
 
 class WheelZoomFilter(QObject):
