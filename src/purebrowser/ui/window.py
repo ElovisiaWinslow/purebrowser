@@ -34,6 +34,7 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
+from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
 from purebrowser.ui.urlbar import UrlBar
@@ -214,7 +215,7 @@ class MainWindow(QMainWindow):
         self.downloads = DownloadManager(self.profile, self.settings, self)
         self.downloads.changed.connect(self._refresh_download_button)
 
-        self.tabs = QTabWidget(self)
+        self.tabs = TabArea(self)
         self.tabs.setTabBar(AdaptiveTabBar(self.tabs))
         self.tabs.setTabsClosable(False)
         self.tabs.setMovable(True)
