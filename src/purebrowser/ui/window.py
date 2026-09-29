@@ -11,6 +11,8 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QProgressBar,
@@ -251,14 +253,16 @@ class MainWindow(QMainWindow):
         top_lay.addWidget(self.win_max)
         top_lay.addWidget(self.win_close)
 
-        # 中央容器：top_row / toolbar / 内容 stack（自上而下）。
+        # 中央容器：top_row / toolbar / find_bar / 内容 stack（自上而下）。
         self._build_toolbar()
+        self._build_find_bar()
         central = QWidget(self)
         central_lay = QVBoxLayout(central)
         central_lay.setContentsMargins(0, 0, 0, 0)
         central_lay.setSpacing(0)
         central_lay.addWidget(self.top_row)
         central_lay.addWidget(self.toolbar)
+        central_lay.addWidget(self.find_bar)
         central_lay.addWidget(self.tabs.stack(), 1)
         self.setCentralWidget(central)
 
@@ -342,6 +346,116 @@ class MainWindow(QMainWindow):
         effect.setOffset(0, dy)
         effect.setColor(QColor(0, 0, 0, alpha))
         widget.setGraphicsEffect(effect)
+
+    def _build_find_bar(self) -> None:
+        """工具栏下方的查找条（Ctrl+F）。默认隐藏，仅在命中时出现。"""
+        self.find_bar = QWidget(self)
+        self.find_bar.setObjectName("findBar")
+        self.find_bar.setFixedHeight(36)
+        self.find_bar.setStyleSheet(
+            f"#findBar {{ background: {self.theme.chrome};"
+            f" border-bottom: 1px solid {self.theme.border}; }}"
+        )
+        lay = QHBoxLayout(self.find_bar)
+        lay.setContentsMargins(10, 2, 10, 2)
+        lay.setSpacing(6)
+
+        self.find_input = QLineEdit(self.find_bar)
+        self.find_input.setPlaceholderText("在页面中查找")
+        self.find_input.setMinimumHeight(26)
+        self.find_input.setMaximumWidth(320)
+        self.find_input.textChanged.connect(self._on_find_text_changed)
+        self.find_input.returnPressed.connect(self._find_next)
+        lay.addWidget(self.find_input)
+
+        self.find_prev = QToolButton(self.find_bar)
+        self.find_prev.setText("↑")
+        self.find_prev.setToolTip("上一个")
+        self.find_prev.setFixedSize(28, 28)
+        self.find_prev.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.find_prev.clicked.connect(self._find_prev)
+        lay.addWidget(self.find_prev)
+
+        self.find_next = QToolButton(self.find_bar)
+        self.find_next.setText("↓")
+        self.find_next.setToolTip("下一个")
+        self.find_next.setFixedSize(28, 28)
+        self.find_next.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.find_next.clicked.connect(self._find_next)
+        lay.addWidget(self.find_next)
+
+        self.find_count = QLabel("0/0", self.find_bar)
+        self.find_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.find_count.setMinimumWidth(44)
+        self.find_count.setStyleSheet(f"color: {self.theme.subtext};")
+        lay.addWidget(self.find_count)
+
+        self.find_close = QToolButton(self.find_bar)
+        self.find_close.setText("×")
+        self.find_close.setToolTip("关闭")
+        self.find_close.setFixedSize(28, 28)
+        self.find_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.find_close.clicked.connect(self._hide_find_bar)
+        lay.addWidget(self.find_close)
+
+        lay.addStretch(1)
+        self.find_bar.hide()
+
+    def _show_find_bar(self) -> None:
+        self.find_bar.show()
+        self.find_input.setFocus()
+        self.find_input.selectAll()
+        text = self.find_input.text()
+        if text:
+            self._on_find_text_changed(text)
+
+    def _hide_find_bar(self) -> None:
+        if not self.find_bar.isVisible():
+            return
+        self.find_bar.hide()
+        self.find_input.clear()
+        page = self._current().view.page()
+        if page is not None:
+            page.findText("")
+        self.find_count.setText("0/0")
+
+    def _on_find_text_changed(self, text: str) -> None:
+        page = self._current().view.page()
+        if page is None:
+            return
+        if not text:
+            page.findText("")
+            self.find_count.setText("0/0")
+            return
+        page.findText(text)
+
+    def _find_next(self) -> None:
+        text = self.find_input.text()
+        if not text:
+            return
+        page = self._current().view.page()
+        if page is not None:
+            page.findText(text)
+
+    def _find_prev(self) -> None:
+        text = self.find_input.text()
+        if not text:
+            return
+        page = self._current().view.page()
+        if page is not None:
+            page.findText(text, QWebEnginePage.FindFlag.FindBackward)
+
+    def _on_find_result(self, result) -> None:
+        total = result.numberOfMatches()
+        active = result.activeMatch()
+        self.find_count.setText("0/0" if total <= 0 else f"{active}/{total}")
+
+    def _handle_escape(self) -> None:
+        """Esc 优先级：先关查找条，否则走原有退出全屏逻辑。"""
+        if self.find_bar.isVisible():
+            self._hide_find_bar()
+            return
+        self._exit_fullscreen()
 
     def _build_statusbar(self) -> None:
         self.progress = QProgressBar(self)
@@ -507,6 +621,7 @@ class MainWindow(QMainWindow):
             lambda: self._close_tab(self.tabs.currentIndex())
         )
         QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self._focus_url_bar)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._show_find_bar)
         QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(
             lambda: self._current().view.reload()
         )
@@ -530,7 +645,7 @@ class MainWindow(QMainWindow):
             lambda: self.download_btn.showMenu()
         )
         QShortcut(QKeySequence("F11"), self).activated.connect(self._toggle_fullscreen)
-        QShortcut(QKeySequence("Escape"), self).activated.connect(self._exit_fullscreen)
+        QShortcut(QKeySequence("Escape"), self).activated.connect(self._handle_escape)
 
     def _focus_url_bar(self) -> None:
         self.url_bar.setFocus()
@@ -712,6 +827,10 @@ class MainWindow(QMainWindow):
         self.top_row.hide()
         self.toolbar.hide()
         self.statusBar().hide()
+        # 进入全屏时收起查找条（含 findText("") 清高亮）；退出后不自动恢复，
+        # 用户需要时再按 Ctrl+F。_show_chrome 故意不 show find_bar。
+        if self.find_bar.isVisible():
+            self._hide_find_bar()
 
     def _show_chrome(self) -> None:
         self.top_row.show()
@@ -953,6 +1072,7 @@ class MainWindow(QMainWindow):
         tab.page_loaded.connect(self._on_page_loaded)
         tab.new_page_requested.connect(self._on_new_page_requested)
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
+        tab.view.page().findTextFinished.connect(self._on_find_result)
         if page is None:
             tab.load(url)
         self._relayout_tabs()
@@ -1002,6 +1122,9 @@ class MainWindow(QMainWindow):
             self.url_bar.setCursorPosition(0)
 
     def _sync_from_tab(self, _idx: int) -> None:
+        # 切换标签后旧高亮已无意义，自动收起查找条。
+        if getattr(self, "find_bar", None) is not None and self.find_bar.isVisible():
+            self._hide_find_bar()
         tab = self.tabs.currentWidget()
         if isinstance(tab, Tab):
             self.url_bar.setText(display_url(tab.current_url()))
