@@ -15,10 +15,12 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QProgressBar,
+    QStackedWidget,
     QTabBar,
     QTabWidget,
     QToolBar,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -216,41 +218,56 @@ class MainWindow(QMainWindow):
         self.downloads.changed.connect(self._refresh_download_button)
 
         self.tabs = TabArea(self)
-        self.tabs.setTabBar(AdaptiveTabBar(self.tabs))
-        self.tabs.setTabsClosable(False)
+        bar = self.tabs.tabBar()
+        bar.setExpanding(False)
+        bar.setDrawBase(False)
+        bar.setMinimumHeight(38)
+        bar.setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setMovable(True)
-        self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(False)
-        self.tabs.tabBar().setExpanding(False)
-        self.tabs.tabBar().setDrawBase(False)
-        self.tabs.tabBar().setMinimumHeight(38)
-        self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
-        self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._sync_from_tab)
-        self.setCentralWidget(self.tabs)
 
         # resize 时新露出的区域先用主题底色填充，避免 DWM 合成出现黑边。
-        # 主窗口用内容色（window）；不透明绘制告诉 Qt 直接画、不清屏到透明。
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.setAutoFillBackground(True)
         mw_pal = self.palette()
         mw_pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.window))
         self.setPalette(mw_pal)
 
-        # QTabWidget 默认透明；填充其底色。用 chrome 而非 window：
-        # 标签栏右侧被 mask 裁掉的区域会露出 QTabWidget 底色，用 chrome 避免接缝；
-        # 内容区（pane）的 window 底色由 QSS `QTabWidget::pane { background: $window }` 提供。
-        self.tabs.setAutoFillBackground(True)
-        tabs_pal = self.tabs.palette()
-        tabs_pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.chrome))
-        self.tabs.setPalette(tabs_pal)
+        # 顶行（窗口最顶部，38px）：标签栏 + 窗口控制键同行（B-2.2b）。
+        self.top_row = QWidget(self)
+        self.top_row.setObjectName("topRow")
+        self.top_row.setFixedHeight(38)
+        self.top_row.setStyleSheet(
+            f"#topRow {{ background: {self.theme.chrome};"
+            f" border-bottom: 1px solid {self.theme.border}; }}"
+        )
+        top_lay = QHBoxLayout(self.top_row)
+        top_lay.setContentsMargins(0, 0, 0, 0)
+        top_lay.setSpacing(0)
+        top_lay.addWidget(bar, 1)
+        self.win_min = self._make_title_button("minimize", "最小化", self.showMinimized)
+        self.win_max = self._make_title_button("maximize", "最大化", self._toggle_maximize)
+        self.win_close = self._make_title_button("close", "关闭", self.close, close=True)
+        top_lay.addWidget(self.win_min)
+        top_lay.addWidget(self.win_max)
+        top_lay.addWidget(self.win_close)
 
-        # 拖动 resize 期间覆盖内容区的冻结帧（只盖 self.tabs 的内容区，不含标签栏）。
-        self._freeze_overlay = FreezeOverlay(self.tabs)
-
+        # 中央容器：top_row / toolbar / 内容 stack（自上而下）。
         self._build_toolbar()
-        self._build_title_bar()
+        central = QWidget(self)
+        central_lay = QVBoxLayout(central)
+        central_lay.setContentsMargins(0, 0, 0, 0)
+        central_lay.setSpacing(0)
+        central_lay.addWidget(self.top_row)
+        central_lay.addWidget(self.toolbar)
+        central_lay.addWidget(self.tabs.stack(), 1)
+        self.setCentralWidget(central)
+
+        # 拖动 resize 期间的冻结帧：覆盖内容 stack（B-2.2b 改父到 stack）。
+        self._freeze_overlay = FreezeOverlay(self.tabs.stack())
+
         self._build_statusbar()
         self._build_tab_plus()
         self._install_shortcuts()
@@ -258,6 +275,7 @@ class MainWindow(QMainWindow):
         self.new_tab(NEWTAB_URL)
 
         self._relayout_tabs()
+        self._update_max_icon()
 
     # ---------- UI ----------
     def _build_toolbar(self) -> None:
@@ -265,7 +283,6 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(18, 18))
         self.toolbar.setFixedHeight(46)
-        self.addToolBar(self.toolbar)
 
         self.back = self.toolbar.addAction(icons.icon("back", self.theme.text), "")
         self.back.setToolTip("后退")
@@ -335,33 +352,9 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
 
-    def _build_title_bar(self) -> None:
-        """独立自绘标题条（38px，位于工具栏之上）+ 右侧窗口控制键。"""
-        self.title_bar = QWidget(self)
-        self.title_bar.setObjectName("titleBar")
-        self.title_bar.setFixedHeight(38)
-        self.title_bar.setStyleSheet(
-            f"#titleBar {{ background: {self.theme.chrome};"
-            f" border-bottom: 1px solid {self.theme.border}; }}"
-        )
-        lay = QHBoxLayout(self.title_bar)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addStretch(1)
-
-        self.win_min = self._make_title_button("minimize", "最小化", self.showMinimized)
-        self.win_max = self._make_title_button("maximize", "最大化", self._toggle_maximize)
-        self.win_close = self._make_title_button("close", "关闭", self.close, close=True)
-        lay.addWidget(self.win_min)
-        lay.addWidget(self.win_max)
-        lay.addWidget(self.win_close)
-
-        self.setMenuWidget(self.title_bar)
-        self._update_max_icon()
-
     def _make_title_button(self, icon_name, tip, slot, close=False) -> _TitleButton:
         size = 10
-        btn = _TitleButton(self.title_bar)
+        btn = _TitleButton(self.top_row)
         btn.setObjectName("winClose" if close else "winBtn")
         normal = icons.icon(icon_name, self.theme.text, size)
         hover = icons.icon(icon_name, "#FFFFFF", size) if close else None
@@ -401,8 +394,8 @@ class MainWindow(QMainWindow):
         self._set_max_icon(will_max)
 
     def _build_tab_plus(self) -> None:
-        """+ 按钮是 self.tabs 的子控件，动态跟随最后一个标签（带上限）。"""
-        self.tab_plus = QToolButton(self.tabs)
+        """+ 按钮是 top_row 的子控件，动态跟随最后一个标签（带上限）。"""
+        self.tab_plus = QToolButton(self.top_row)
         self.tab_plus.setObjectName("tabPlus")
         self.tab_plus.setText("")
         self.tab_plus.setIcon(icons.icon("plus", self.theme.subtext, 16))
@@ -459,7 +452,7 @@ class MainWindow(QMainWindow):
 
     def _position_tab_plus(self, *_args) -> None:
         bar = self.tabs.tabBar()
-        bar_pos = bar.mapTo(self.tabs, QPoint(0, 0))
+        bar_pos = bar.mapTo(self.top_row, QPoint(0, 0))
         last_visible = -1
         for i in range(bar.count()):
             if bar.isTabVisible(i):
@@ -625,7 +618,7 @@ class MainWindow(QMainWindow):
         if view is None or view.width() <= 0 or view.height() <= 0:
             return
         pixmap = view.grab()
-        self._freeze_overlay.setParent(self.tabs)
+        self._freeze_overlay.setParent(self.tabs.stack())
         self._sync_overlay_geometry()
         self._freeze_overlay.set_frame(pixmap)
         self._freeze_overlay.show()
@@ -637,12 +630,9 @@ class MainWindow(QMainWindow):
         self._freeze_overlay.clear_frame()
 
     def _sync_overlay_geometry(self) -> None:
-        # 只覆盖标签栏下方的内容区，不覆盖标签栏本身。
-        bar = self.tabs.tabBar()
-        top = bar.height() if bar.isVisible() else 0
-        self._freeze_overlay.setGeometry(
-            0, top, self.tabs.width(), max(0, self.tabs.height() - top)
-        )
+        # overlay 父控件是内容 stack，几何即 stack 的完整矩形。
+        st = self.tabs.stack()
+        self._freeze_overlay.setGeometry(0, 0, st.width(), st.height())
 
     def _native_hit_test(self, msg) -> int:
         """屏幕物理坐标 → 窗口本地逻辑坐标后判定命中区（含 150% DPI 换算）。"""
@@ -701,20 +691,14 @@ class MainWindow(QMainWindow):
         return HTCLIENT
 
     def _hide_chrome(self) -> None:
+        self.top_row.hide()
         self.toolbar.hide()
-        self.title_bar.hide()
-        self.tabs.tabBar().hide()
         self.statusBar().hide()
-        self.tabs.setStyleSheet(
-            "QTabWidget::pane { border: 0; margin: 0; padding: 0; }"
-        )
 
     def _show_chrome(self) -> None:
+        self.top_row.show()
         self.toolbar.show()
-        self.title_bar.show()
-        self.tabs.tabBar().show()
         self.statusBar().show()
-        self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
 
     def _hwnd(self):
         return wintypes.HWND(int(self.winId()))

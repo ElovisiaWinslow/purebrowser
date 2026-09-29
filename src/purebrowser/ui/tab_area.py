@@ -33,6 +33,9 @@ class TabArea(QWidget):
     def tabBar(self) -> AdaptiveTabBar:
         return self._bar
 
+    def stack(self) -> QStackedWidget:
+        return self._stack
+
     # ---------- QTabWidget 兼容 API ----------
     def setTabBar(self, bar) -> None:
         # 使用内建 _bar；外部传入的丢弃，避免游离控件。
