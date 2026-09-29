@@ -119,20 +119,25 @@ purebrowser/
 ├─ src/purebrowser/          # 全部 Python 代码
 │  ├─ main.py                # 入口，注入 Chromium flags
 │  ├─ app.py                 # QApplication，scheme 注册
-│  ├─ window.py              # 主窗口、标签、菜单、快捷键
-│  ├─ tab.py                 # 单标签封装（含 createWindow）
-│  ├─ profile.py             # 隐私 profile
-│  ├─ interceptor.py         # 请求拦截器
-│  ├─ privacy/flags.py       # Chromium 命令行参数
-│  ├─ downloads.py           # 下载管理
-│  ├─ history.py             # 历史
-│  ├─ bookmarks.py           # 书签
-│  ├─ storage.py             # SQLite 连接
-│  ├─ pages.py               # purebrowser:// 本地页处理
-│  ├─ settings.py            # 配置
-│  ├─ locations.py           # 数据/缓存路径
-│  ├─ urlbar.py              # 地址栏 + 补全
-│  └─ newtab.py              # 新标签页
+│  ├─ __main__.py            # python -m purebrowser 入口
+│  ├─ ui/                    # UI 层
+│  │  ├─ window.py           # 主窗口、标签、菜单、快捷键
+│  │  ├─ tab.py              # 单标签封装（含 createWindow）
+│  │  └─ urlbar.py           # 地址栏 + 补全
+│  ├─ core/                  # 核心层
+│  │  ├─ profile.py          # 隐私 profile
+│  │  ├─ interceptor.py      # 请求拦截器
+│  │  ├─ settings.py         # 配置
+│  │  ├─ locations.py        # 数据/缓存路径
+│  │  └─ privacy/flags.py    # Chromium 命令行参数
+│  ├─ data/                  # 数据层
+│  │  ├─ storage.py          # SQLite 连接
+│  │  ├─ history.py          # 历史
+│  │  └─ bookmarks.py        # 书签
+│  └─ pages/                 # 页面层
+│     ├─ pages.py            # purebrowser:// 本地页处理
+│     ├─ downloads.py        # 下载管理
+│     └─ newtab.py           # 新标签页
 ├─ tools/
 │  ├─ audit/net_audit.py     # 网络审计
 │  └─ rules/                 # EasyList 编译

@@ -58,9 +58,9 @@ pip install --upgrade PyQt6_sip
 
 | 文件 | 原因 |
 |---|---|
-| `src/purebrowser/profile.py` | 内藏 H.264 兼容、UA、隐私默认策略的精细平衡 |
-| `src/purebrowser/privacy/flags.py` | Chromium 命令行参数逐个调过，改动会导致启动异常 |
-| `src/purebrowser/interceptor.py` | 拦截规则和 HTTPS 强制逻辑是隐私核心 |
+| `src/purebrowser/core/profile.py` | 内藏 H.264 兼容、UA、隐私默认策略的精细平衡 |
+| `src/purebrowser/core/privacy/flags.py` | Chromium 命令行参数逐个调过，改动会导致启动异常 |
+| `src/purebrowser/core/interceptor.py` | 拦截规则和 HTTPS 强制逻辑是隐私核心 |
 | `docs/BUILD_NOTES.md` | 历史记录文档，不可被"润色"或重构 |
 | `resources/newtab.html` | 新标签页外观，用户手工调过 |
 
@@ -96,16 +96,16 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 
 ### 3.1 主逻辑
 
-- `src/purebrowser/window.py` — 主窗口、标签、菜单
-- `src/purebrowser/tab.py` — 标签封装
-- `src/purebrowser/urlbar.py` — 地址栏补全
-- `src/purebrowser/downloads.py` — 下载管理
-- `src/purebrowser/pages.py` — 本地页面
-- `src/purebrowser/settings.py` — 配置读写
-- `src/purebrowser/storage.py` — SQLite
-- `src/purebrowser/history.py` — 历史
-- `src/purebrowser/bookmarks.py` — 书签
-- `src/purebrowser/locations.py` — 路径管理
+- `src/purebrowser/ui/window.py` — 主窗口、标签、菜单
+- `src/purebrowser/ui/tab.py` — 标签封装
+- `src/purebrowser/ui/urlbar.py` — 地址栏补全
+- `src/purebrowser/pages/downloads.py` — 下载管理
+- `src/purebrowser/pages/pages.py` — 本地页面
+- `src/purebrowser/core/settings.py` — 配置读写
+- `src/purebrowser/data/storage.py` — SQLite
+- `src/purebrowser/data/history.py` — 历史
+- `src/purebrowser/data/bookmarks.py` — 书签
+- `src/purebrowser/core/locations.py` — 路径管理
 - `src/purebrowser/app.py` — QApplication 引导（谨慎）
 
 ### 3.2 UI 和资源
@@ -315,10 +315,10 @@ PureBrowser 的目标用户是：
 
 以下改动**必须**额外跑 `tools/e2e_test.py`：
 
-- `src/purebrowser/profile.py`
-- `src/purebrowser/privacy/flags.py`
-- `src/purebrowser/tab.py`
-- `src/purebrowser/window.py`
+- `src/purebrowser/core/profile.py`
+- `src/purebrowser/core/privacy/flags.py`
+- `src/purebrowser/ui/tab.py`
+- `src/purebrowser/ui/window.py`
 - `pyproject.toml` / `requirements.txt` 里的依赖相关部分
 
 命令：
