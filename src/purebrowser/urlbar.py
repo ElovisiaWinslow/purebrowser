@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QStringListModel, Qt
 from PyQt6.QtWidgets import QCompleter, QLineEdit
 
-from . import history as history_mod
+from purebrowser import history as history_mod
 
 
 class UrlBar(QLineEdit):

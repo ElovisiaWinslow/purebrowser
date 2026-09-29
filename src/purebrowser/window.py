@@ -16,17 +16,17 @@ from PyQt6.QtWidgets import (
     QToolButton,
 )
 
-from . import bookmarks, history
-from .downloads import DownloadManager
-from .interceptor import Blocker
-from .locations import settings_file
-from .newtab import NEWTAB_URL, display_url
-from .pages import PureBrowserSchemeHandler
-from .profile import build_profile
-from .settings import SEARCH_ENGINES, Settings
-from .storage import connect
-from .tab import Tab, to_url
-from .urlbar import UrlBar
+from purebrowser import bookmarks, history
+from purebrowser.downloads import DownloadManager
+from purebrowser.interceptor import Blocker
+from purebrowser.locations import settings_file
+from purebrowser.newtab import NEWTAB_URL, display_url
+from purebrowser.pages import PureBrowserSchemeHandler
+from purebrowser.profile import build_profile
+from purebrowser.settings import SEARCH_ENGINES, Settings
+from purebrowser.storage import connect
+from purebrowser.tab import Tab, to_url
+from purebrowser.urlbar import UrlBar
 
 # ---------------------------------------------------------------------------
 # 原生 Win32 全屏支持（ctypes，标准库，不引入新依赖）。

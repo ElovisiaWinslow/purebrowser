@@ -2,10 +2,10 @@
 
 
 def main() -> int:
-    from .privacy import flags
+    from purebrowser.privacy import flags
     flags.apply()
 
-    from .app import run
+    from purebrowser.app import run
     return run()
 
 
