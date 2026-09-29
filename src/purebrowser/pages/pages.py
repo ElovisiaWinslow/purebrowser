@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QFileDialog
 from purebrowser.data import history as history_mod
 from purebrowser.core.locations import default_download_dir, set_data_dir
 
-NEWTAB_HTML_PATH = Path(__file__).resolve().parents[2] / "resources" / "newtab.html"
+NEWTAB_HTML_PATH = Path(__file__).resolve().parents[3] / "resources" / "newtab.html"
 
 REFRESH_SNIPPET = (
     b"<html><head><meta charset='utf-8'></head>"
