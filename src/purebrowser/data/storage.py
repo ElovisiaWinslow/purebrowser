@@ -25,6 +25,21 @@ CREATE TABLE IF NOT EXISTS favicons (
     data BLOB NOT NULL,
     fetched_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    total INTEGER NOT NULL DEFAULT 0,
+    received INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'inprogress',
+    interrupt_reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    mime TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(created_at DESC);
 """
 
 

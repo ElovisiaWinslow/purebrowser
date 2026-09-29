@@ -37,6 +37,7 @@ from purebrowser.core.locations import settings_file
 from purebrowser.core.profile import build_profile
 from purebrowser.core.settings import SEARCH_ENGINES, Settings
 from purebrowser.data import bookmarks, history
+from purebrowser.data import downloads_store
 from purebrowser.data import favicons
 from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
@@ -231,8 +232,11 @@ class MainWindow(QMainWindow):
         )
         self.profile.installUrlSchemeHandler(b"purebrowser", self.scheme_handler)
 
-        self.downloads = DownloadManager(self.profile, self.settings, self)
+        self.downloads = DownloadManager(self.profile, self.settings, self.conn, self)
         self.downloads.changed.connect(self._refresh_download_button)
+        # 上次会话遗留的进行中记录无法继续，标记为已中断；并裁剪历史到 200 条。
+        downloads_store.mark_inprogress_as_interrupted(self.conn)
+        downloads_store.prune(self.conn, 200)
 
         self.tabs = TabArea(self)
         bar = self.tabs.tabBar()
@@ -1154,8 +1158,19 @@ class MainWindow(QMainWindow):
                 bookmarks.remove(self.conn, meta.get("key"))
                 self._refresh_bookmark_icon()
             elif kind == "download":
-                self.downloads.remove(meta.get("rec"))
+                rec = meta.get("rec")
+                if rec is not None:
+                    self.downloads.remove(rec)
+                elif meta.get("key") is not None:
+                    downloads_store.remove(self.conn, meta.get("key"))
             self._remove_menu_row(menu, action)
+            return
+        path = meta.get("path") or ""
+        if action_id == "open":
+            self.downloads.open_file(path)
+            return
+        if action_id == "folder":
+            self.downloads.reveal_in_explorer(path)
             return
         rec = meta.get("rec")
         if rec is None:
@@ -1166,10 +1181,6 @@ class MainWindow(QMainWindow):
             self.downloads.resume(rec)
         elif action_id == "cancel":
             self.downloads.cancel(rec)
-        elif action_id == "open":
-            self.downloads.open_file(meta.get("path") or "")
-        elif action_id == "folder":
-            self.downloads.reveal_in_explorer(meta.get("path") or "")
         else:
             return
         self._populate_download_menu()
@@ -1269,42 +1280,70 @@ class MainWindow(QMainWindow):
         self.download_menu._row_map = rows_map
         open_folder = self.download_menu.addAction("打开下载文件夹")
         open_folder.triggered.connect(self.downloads.open_folder)
-        if not self.downloads.has_any():
+
+        live = list(self.downloads.records)
+        live_ids = {r.get("db_id") for r in live if r.get("db_id") is not None}
+        history = [row for row in downloads_store.list_recent(self.conn, 200)
+                   if row["id"] not in live_ids]
+
+        entries = [(r.get("created_at", 0), r, None) for r in live]
+        entries += [(h["created_at"], None, h) for h in history]
+        entries.sort(key=lambda e: e[0], reverse=True)
+
+        if not entries:
             self.download_menu.addSeparator()
             a = self.download_menu.addAction("暂无下载")
             a.setEnabled(False)
             return
         self.download_menu.addSeparator()
-        active, done, failed = [], [], []
-        for rec in reversed(self.downloads.records):
-            if rec["canceled"]:
-                failed.append(rec)
-            elif rec["finished"]:
-                done.append(rec)
+
+        groups = {"进行中": [], "已完成": [], "失败": []}
+        for _created, rec, h in entries:
+            if rec is not None:
+                if not rec["finished"]:
+                    groups["进行中"].append((rec, h))
+                elif rec["canceled"]:
+                    groups["失败"].append((rec, h))
+                else:
+                    groups["已完成"].append((rec, h))
             else:
-                active.append(rec)
+                if h["state"] == "completed":
+                    groups["已完成"].append((rec, h))
+                elif h["state"] in ("cancelled", "interrupted"):
+                    groups["失败"].append((rec, h))
+                else:
+                    groups["进行中"].append((rec, h))
+
         for label, items, icon_name in (
-            ("进行中", active, "download"),
-            ("已完成", done, "file"),
-            ("失败", failed, "alert"),
+            ("进行中", groups["进行中"], "download"),
+            ("已完成", groups["已完成"], "file"),
+            ("失败", groups["失败"], "alert"),
         ):
             if not items:
                 continue
             sub = self._submenu(self.download_menu, label)
             sub_map = sub._row_map
-            for rec in items:
-                self._add_menu_row(
-                    sub,
-                    sub_map,
-                    title=rec["filename"],
-                    subtitle=self._download_status(rec),
-                    icon=icons.icon(icon_name, self.theme.subtext, 20),
-                    kind="download",
-                    key=id(rec),
-                    buttons=self._download_buttons(rec),
-                    path=rec["path"],
-                    rec=rec,
-                )
+            for rec, h in items:
+                if rec is not None:
+                    self._add_menu_row(
+                        sub, sub_map,
+                        title=rec["filename"],
+                        subtitle=self._download_status(rec),
+                        icon=icons.icon(icon_name, self.theme.subtext, 20),
+                        kind="download", key=rec.get("db_id"),
+                        buttons=self._download_buttons(rec),
+                        path=rec["path"], rec=rec,
+                    )
+                else:
+                    self._add_menu_row(
+                        sub, sub_map,
+                        title=h["filename"] or h["path"],
+                        subtitle=self._history_status(h),
+                        icon=icons.icon(icon_name, self.theme.subtext, 20),
+                        kind="download", key=h["id"],
+                        buttons=self._history_buttons(h),
+                        path=h["path"], rec=None,
+                    )
 
     def _download_buttons(self, rec: dict) -> list:
         color = self.theme.subtext
@@ -1328,6 +1367,29 @@ class MainWindow(QMainWindow):
             pause,
             {"id": "cancel", "icon": icons.icon("cancel", color, 16), "tooltip": "取消下载"},
         ]
+
+    def _history_status(self, row) -> str:
+        state = row["state"]
+        reason = row["interrupt_reason"] or ""
+        size = self._human_size(row["total"])
+        if state == "completed":
+            return f"已完成 · {size}"
+        if state == "cancelled":
+            return "已取消" + (f" · {reason}" if reason else "")
+        if state == "interrupted":
+            return "已中断" + (f" · {reason}" if reason else "")
+        return f"进行中 · {size}"
+
+    def _history_buttons(self, row) -> list:
+        color = self.theme.subtext
+        exists = bool(row["path"]) and Path(row["path"]).exists()
+        buttons = []
+        if row["state"] == "completed" and exists:
+            buttons.append({"id": "open", "icon": icons.icon("open", color, 16), "tooltip": "打开文件"})
+        if exists:
+            buttons.append({"id": "folder", "icon": icons.icon("folder", color, 16), "tooltip": "打开所在目录"})
+        buttons.append({"id": "remove", "icon": icons.icon("cancel", color, 16), "tooltip": "从列表移除"})
+        return buttons
 
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()

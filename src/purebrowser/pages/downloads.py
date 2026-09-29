@@ -1,21 +1,34 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 
 from purebrowser.core.locations import default_download_dir
+from purebrowser.data import downloads_store
 
 _State = QWebEngineDownloadRequest.DownloadState
+
+
+def _state_text(state) -> str:
+    if state == _State.DownloadCompleted:
+        return "completed"
+    if state == _State.DownloadCancelled:
+        return "cancelled"
+    if state == _State.DownloadInterrupted:
+        return "interrupted"
+    return "inprogress"
 
 
 class DownloadManager(QObject):
     changed = pyqtSignal()
 
-    def __init__(self, profile, settings, parent=None):
+    def __init__(self, profile, settings, conn, parent=None):
         super().__init__(parent)
         self.settings = settings
+        self.conn = conn
         self.records: list[dict] = []
         profile.downloadRequested.connect(self._on_requested)
 
@@ -37,12 +50,19 @@ class DownloadManager(QObject):
             "total": req.totalBytes(),
             "received": 0,
             "state": req.state(),
-            "interrupt_reason": req.interruptReasonString() or "",
+            "interrupt_reason": "",
             "is_paused": req.isPaused(),
             "finished": False,
             "canceled": False,
+            "url": req.url().toString(),
+            "mime": req.mimeType(),
+            "created_at": int(time.time()),
+            "finished_at": None,
+            "state_text": "inprogress",
+            "db_id": None,
         }
         self.records.append(rec)
+        rec["db_id"] = downloads_store.save(self.conn, rec)
 
         req.receivedBytesChanged.connect(lambda r=req: self._on_progress(r))
         req.totalBytesChanged.connect(lambda r=req: self._on_progress(r))
@@ -72,15 +92,33 @@ class DownloadManager(QObject):
         if rec is None:
             return
         rec["state"] = req.state()
+        rec["state_text"] = _state_text(req.state())
         rec["is_paused"] = req.isPaused()
-        rec["interrupt_reason"] = req.interruptReasonString() or ""
+        if req.state() == _State.DownloadInterrupted:
+            rec["interrupt_reason"] = req.interruptReasonString() or ""
         rec["received"] = req.receivedBytes()
         rec["total"] = req.totalBytes() or rec["total"]
         if req.isFinished():
             rec["finished"] = True
             rec["canceled"] = req.state() != _State.DownloadCompleted
+            rec["finished_at"] = int(time.time())
             rec["req"] = None
+        self._persist(rec)
         self.changed.emit()
+
+    def _persist(self, rec: dict) -> None:
+        db_id = rec.get("db_id")
+        if db_id is None:
+            return
+        downloads_store.update(
+            self.conn,
+            db_id,
+            rec.get("state_text", "inprogress"),
+            rec.get("received", 0),
+            rec.get("total", 0),
+            rec.get("interrupt_reason", ""),
+            rec.get("finished_at"),
+        )
 
     # ---------- controls (only meaningful while InProgress) ----------
     def toggle_pause(self, rec: dict) -> None:
@@ -95,6 +133,7 @@ class DownloadManager(QObject):
             return
         req.pause()
         rec["is_paused"] = True
+        self._persist(rec)
         self.changed.emit()
 
     def resume(self, rec: dict) -> None:
@@ -103,6 +142,7 @@ class DownloadManager(QObject):
             return
         req.resume()
         rec["is_paused"] = False
+        self._persist(rec)
         self.changed.emit()
 
     def cancel(self, rec: dict) -> None:
@@ -110,6 +150,7 @@ class DownloadManager(QObject):
         if req is None or req.state() != _State.DownloadInProgress:
             return
         req.cancel()
+        self._persist(rec)
         self.changed.emit()
 
     # ---------- helpers ----------
@@ -160,9 +201,12 @@ class DownloadManager(QObject):
             return False
 
     def remove(self, rec: dict) -> None:
-        """从列表移除一条下载记录（仅内存；持久化见 DL-3）。"""
+        """从列表移除一条记录，并同步删除库中的对应行（不删文件）。"""
+        db_id = rec.get("db_id")
         try:
             self.records.remove(rec)
         except ValueError:
             return
+        if db_id is not None:
+            downloads_store.remove(self.conn, db_id)
         self.changed.emit()
