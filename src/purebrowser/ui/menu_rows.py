@@ -3,9 +3,9 @@
 主题色全部来自 Theme；行背景不透明以遮住 QMenu 默认选中色，悬停高亮由
 QMenu.hovered 驱动（调用方 set_highlight）。右侧占位区当前留空。
 """
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QIcon, QPixmap
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 ICON = 20
 RIGHT_RESERVED = 22
@@ -14,6 +14,8 @@ ICON_GAP = 10
 
 
 class MenuRow(QWidget):
+    delete_requested = pyqtSignal(object)
+
     def __init__(
         self,
         theme,
@@ -22,6 +24,7 @@ class MenuRow(QWidget):
         icon: QPixmap | QIcon | None = None,
         width: int = 360,
         dim: bool = False,
+        deletable: bool = False,
     ):
         super().__init__()
         self.setObjectName("menuRow")
@@ -33,6 +36,8 @@ class MenuRow(QWidget):
         self._hover = theme.hover
         self._title_color = theme.subtext if dim else theme.text
         self._sub_color = theme.subtext
+        self._strong_text = theme.text
+        self._deletable = bool(deletable)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(H_PAD, 6, H_PAD, 6)
@@ -69,9 +74,20 @@ class MenuRow(QWidget):
 
         lay.addLayout(col, 1)
 
-        self._right = QWidget(self)
-        self._right.setFixedWidth(RIGHT_RESERVED)
-        lay.addWidget(self._right)
+        self._delete_btn = QToolButton(self)
+        if deletable:
+            self._delete_btn.setObjectName("menuRowDelete")
+            self._delete_btn.setText("\u00D7")
+            self._delete_btn.setToolTip("删除")
+            self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._delete_btn.setFixedSize(RIGHT_RESERVED - 4, RIGHT_RESERVED - 4)
+            self._delete_btn.setVisible(False)
+            self._delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+            lay.addWidget(self._delete_btn)
+        else:
+            self._right = QWidget(self)
+            self._right.setFixedWidth(RIGHT_RESERVED)
+            lay.addWidget(self._right)
 
         self._apply_bg(self._bg)
 
@@ -96,10 +112,15 @@ class MenuRow(QWidget):
 
     def set_highlight(self, on: bool) -> None:
         self._apply_bg(self._hover if on else self._bg)
+        if self._deletable:
+            self._delete_btn.setVisible(on)
 
     def _apply_bg(self, bg: str) -> None:
         self.setStyleSheet(
             f"#menuRow {{ background: {bg}; }}"
             f"#menuRowTitle {{ color: {self._title_color}; font-size: 13px; }}"
             f"#menuRowSub {{ color: {self._sub_color}; font-size: 11px; }}"
+            f"#menuRowDelete {{ color: {self._sub_color}; background: transparent;"
+            f" border: 0; border-radius: 4px; font-size: 13px; }}"
+            f"#menuRowDelete:hover {{ background: {self._hover}; color: {self._strong_text}; }}"
         )

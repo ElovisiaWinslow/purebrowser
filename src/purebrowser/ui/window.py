@@ -362,6 +362,7 @@ class MainWindow(QMainWindow):
         # 行映射挂在各菜单对象上（menu._row_map），子菜单销毁即释放，避免泄漏。
         for _m in (self.history_menu, self.bookmarks_menu, self.download_menu):
             _m.hovered.connect(lambda a, m=_m: self._on_menu_hovered(m, a))
+            _m.installEventFilter(self)
 
     @staticmethod
     def _apply_shadow(widget, blur: int = 12, dy: int = 2, alpha: int = 30) -> None:
@@ -461,7 +462,18 @@ class MainWindow(QMainWindow):
         # view 首次显示/打磨后 focusProxy 才可用：此时挂上滚轮过滤器。
         if event.type() in (QEvent.Type.Show, QEvent.Type.Polish):
             self._ensure_wheel_filter(obj)
+        elif isinstance(obj, QMenu) and event.type() == QEvent.Type.MouseButtonPress:
+            self._menu_note_click(obj, event)
         return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _menu_note_click(menu, event) -> None:
+        """记录本次菜单点击是否要新标签打开（中键 / Ctrl+左键）。"""
+        new_tab = event.button() == Qt.MouseButton.MiddleButton or (
+            event.button() == Qt.MouseButton.LeftButton
+            and bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        )
+        menu._last_new_tab = new_tab
 
     # ---------- 页面缩放 ----------
     def _site_zoom(self) -> dict:
@@ -1069,6 +1081,7 @@ class MainWindow(QMainWindow):
         sub = parent_menu.addMenu(label)
         sub._row_map = {}
         sub.hovered.connect(lambda a, m=sub: self._on_menu_hovered(m, a))
+        sub.installEventFilter(self)
         self._apply_shadow(sub)
         return sub
 
@@ -1079,17 +1092,65 @@ class MainWindow(QMainWindow):
                 return pixmap
         return self._globe_icon()
 
-    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, handler=None, dim=False):
-        row = MenuRow(self.theme, title, subtitle=subtitle, icon=icon, dim=dim)
+    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, url=None, kind=None, key=None):
+        deletable = kind is not None
+        row = MenuRow(
+            self.theme,
+            title,
+            subtitle=subtitle,
+            icon=icon,
+            dim=(url is None),
+            deletable=deletable,
+        )
         action = QWidgetAction(menu)
         action.setDefaultWidget(row)
         menu.addAction(action)
-        if handler is not None and not dim:
-            action.triggered.connect(handler)
-        else:
+        row._meta = {"kind": kind, "key": key, "url": url}
+        row._action = action
+        row._menu = menu
+        if url is None:
             action.setEnabled(False)
+        else:
+            action.triggered.connect(self._on_action_triggered)
+        if deletable:
+            row.delete_requested.connect(self._on_row_delete)
         rows[action] = row
         return action
+
+    def _on_action_triggered(self) -> None:
+        """行被左键触发：Ctrl/中键（由菜单事件过滤器记录）→ 新标签，否则当前标签。"""
+        action = self.sender()
+        menu = action.parent() if action is not None else None
+        row = getattr(menu, "_row_map", {}).get(action) if menu is not None else None
+        if row is None:
+            return
+        url = (getattr(row, "_meta", None) or {}).get("url")
+        if not url:
+            return
+        if getattr(menu, "_last_new_tab", False):
+            self.new_tab(QUrl(url))
+        else:
+            self._open_in_current_tab(url)
+
+    def _on_row_delete(self, row) -> None:
+        """× 删除该行：历史按 id、书签按 url，然后从菜单移除。"""
+        meta = getattr(row, "_meta", None) or {}
+        menu = getattr(row, "_menu", None)
+        action = getattr(row, "_action", None)
+        if not meta or menu is None or action is None:
+            return
+        kind = meta.get("kind")
+        if kind == "history":
+            history.remove_by_id(self.conn, meta.get("key"))
+        elif kind == "bookmark":
+            bookmarks.remove(self.conn, meta.get("key"))
+            self._refresh_bookmark_icon()
+        rows = getattr(menu, "_row_map", {})
+        rows.pop(action, None)
+        menu.removeAction(action)
+        action.deleteLater()
+        row.deleteLater()
+        menu.update()
 
     @staticmethod
     def _human_size(n) -> str:
@@ -1146,7 +1207,9 @@ class MainWindow(QMainWindow):
                         title=r["title"] or url,
                         subtitle=host or url,
                         icon=self._host_icon(host),
-                        handler=lambda checked=False, u=url: self._open_in_current_tab(u),
+                        url=url,
+                        kind="history",
+                        key=r["id"],
                     )
         self.history_menu.addSeparator()
         view_all = self.history_menu.addAction("查看全部历史记录")
@@ -1170,7 +1233,9 @@ class MainWindow(QMainWindow):
                 title=r["title"] or url,
                 subtitle=host or url,
                 icon=self._host_icon(host),
-                handler=lambda checked=False, u=url: self._open_in_current_tab(u),
+                url=url,
+                kind="bookmark",
+                key=url,
             )
         self.bookmarks_menu.addSeparator()
         clear_all = self.bookmarks_menu.addAction("清空所有书签")
@@ -1212,7 +1277,6 @@ class MainWindow(QMainWindow):
                     title=rec["filename"],
                     subtitle=self._download_status(rec),
                     icon=icons.icon(icon_name, self.theme.subtext, 20),
-                    dim=True,
                 )
 
     def _refresh_download_button(self) -> None:

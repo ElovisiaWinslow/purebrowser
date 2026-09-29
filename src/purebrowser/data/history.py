@@ -32,11 +32,16 @@ def add_visit(conn: sqlite3.Connection, url: str, title: str) -> None:
 
 def recent(conn: sqlite3.Connection, limit: int = 200):
     cur = conn.execute(
-        "SELECT url, title, host, visited_at, visit_count FROM history "
+        "SELECT id, url, title, host, visited_at, visit_count FROM history "
         "ORDER BY visited_at DESC LIMIT ?",
         (limit,),
     )
     return cur.fetchall()
+
+
+def remove_by_id(conn: sqlite3.Connection, row_id: int) -> None:
+    conn.execute("DELETE FROM history WHERE id = ?", (row_id,))
+    conn.commit()
 
 
 def suggest(conn: sqlite3.Connection, prefix: str, limit: int = 10):
