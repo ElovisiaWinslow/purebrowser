@@ -1092,28 +1092,26 @@ class MainWindow(QMainWindow):
                 return pixmap
         return self._globe_icon()
 
-    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, url=None, kind=None, key=None):
-        deletable = kind is not None
+    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, url=None,
+                      kind=None, key=None, buttons=None, path=None, rec=None):
         row = MenuRow(
             self.theme,
             title,
             subtitle=subtitle,
             icon=icon,
             dim=(url is None),
-            deletable=deletable,
+            buttons=buttons,
+            deletable=(buttons is None and kind in ("history", "bookmark")),
         )
         action = QWidgetAction(menu)
         action.setDefaultWidget(row)
         menu.addAction(action)
-        row._meta = {"kind": kind, "key": key, "url": url}
+        row._meta = {"kind": kind, "key": key, "url": url, "path": path, "rec": rec}
         row._action = action
         row._menu = menu
-        if url is None:
-            action.setEnabled(False)
-        else:
+        if url is not None:
             action.triggered.connect(self._on_action_triggered)
-        if deletable:
-            row.delete_requested.connect(self._on_row_delete)
+        row.action_requested.connect(self._on_row_action)
         rows[action] = row
         return action
 
@@ -1132,25 +1130,47 @@ class MainWindow(QMainWindow):
         else:
             self._open_in_current_tab(url)
 
-    def _on_row_delete(self, row) -> None:
-        """× 删除该行：历史按 id、书签按 url，然后从菜单移除。"""
+    def _remove_menu_row(self, menu, action) -> None:
+        if menu is None or action is None:
+            return
+        rows = getattr(menu, "_row_map", {})
+        row = rows.pop(action, None)
+        menu.removeAction(action)
+        action.deleteLater()
+        if row is not None:
+            row.deleteLater()
+        menu.update()
+
+    def _on_row_action(self, row, action_id: str) -> None:
+        """菜单行右侧按钮：删除/移除、下载控制（暂停/继续/取消/打开/目录）。"""
         meta = getattr(row, "_meta", None) or {}
         menu = getattr(row, "_menu", None)
         action = getattr(row, "_action", None)
-        if not meta or menu is None or action is None:
-            return
         kind = meta.get("kind")
-        if kind == "history":
-            history.remove_by_id(self.conn, meta.get("key"))
-        elif kind == "bookmark":
-            bookmarks.remove(self.conn, meta.get("key"))
-            self._refresh_bookmark_icon()
-        rows = getattr(menu, "_row_map", {})
-        rows.pop(action, None)
-        menu.removeAction(action)
-        action.deleteLater()
-        row.deleteLater()
-        menu.update()
+        if action_id in ("delete", "remove"):
+            if kind == "history":
+                history.remove_by_id(self.conn, meta.get("key"))
+            elif kind == "bookmark":
+                bookmarks.remove(self.conn, meta.get("key"))
+                self._refresh_bookmark_icon()
+            self._remove_menu_row(menu, action)
+            return
+        rec = meta.get("rec")
+        if rec is None:
+            return
+        if action_id == "pause":
+            self.downloads.pause(rec)
+        elif action_id == "resume":
+            self.downloads.resume(rec)
+        elif action_id == "cancel":
+            self.downloads.cancel(rec)
+        elif action_id == "open":
+            self.downloads.open_file(meta.get("path") or "")
+        elif action_id == "folder":
+            self.downloads.reveal_in_explorer(meta.get("path") or "")
+        else:
+            return
+        self._populate_download_menu()
 
     @staticmethod
     def _human_size(n) -> str:
@@ -1277,7 +1297,35 @@ class MainWindow(QMainWindow):
                     title=rec["filename"],
                     subtitle=self._download_status(rec),
                     icon=icons.icon(icon_name, self.theme.subtext, 20),
+                    kind="download",
+                    key=id(rec),
+                    buttons=self._download_buttons(rec),
+                    path=rec["path"],
+                    rec=rec,
                 )
+
+    def _download_buttons(self, rec: dict) -> list:
+        color = self.theme.subtext
+        if rec["canceled"]:
+            return [
+                {"id": "folder", "icon": icons.icon("folder", color, 16), "tooltip": "打开所在目录"},
+                {"id": "remove", "icon": icons.icon("cancel", color, 16), "tooltip": "从列表移除"},
+            ]
+        if rec["finished"]:
+            return [
+                {"id": "open", "icon": icons.icon("open", color, 16), "tooltip": "打开文件"},
+                {"id": "folder", "icon": icons.icon("folder", color, 16), "tooltip": "打开所在目录"},
+                {"id": "remove", "icon": icons.icon("cancel", color, 16), "tooltip": "从列表移除"},
+            ]
+        pause = (
+            {"id": "resume", "icon": icons.icon("play", color, 16), "tooltip": "继续"}
+            if rec.get("is_paused")
+            else {"id": "pause", "icon": icons.icon("pause", color, 16), "tooltip": "暂停"}
+        )
+        return [
+            pause,
+            {"id": "cancel", "icon": icons.icon("cancel", color, 16), "tooltip": "取消下载"},
+        ]
 
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()

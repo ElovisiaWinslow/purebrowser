@@ -1,7 +1,10 @@
-"""基于 QWidgetAction 的菜单富行：左图标 + 标题 + 副标题 + 右侧占位（D-3b 放 ×）。
+"""基于 QWidgetAction 的菜单富行：左图标 + 标题 + 副标题 + 右侧按钮组。
 
-主题色全部来自 Theme；行背景不透明以遮住 QMenu 默认选中色，悬停高亮由
-QMenu.hovered 驱动（调用方 set_highlight）。右侧占位区当前留空。
+- 右侧按钮组由 `buttons` 描述（列表，每项 {id, icon?, text?, tooltip?}）；
+  旧的 `deletable=True` 等价于单按钮组（内容 "×"，id="delete"）。
+- 主题色全部来自 Theme；行背景不透明以遮住 QMenu 默认选中色，悬停高亮由
+  QMenu.hovered 驱动（调用方 set_highlight），按钮随 hover 显示/隐藏。
+- 按钮点击独立于整行（不透传）；通过 action_requested(row, button_id) 上报。
 """
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QIcon, QPixmap
@@ -11,10 +14,13 @@ ICON = 20
 RIGHT_RESERVED = 22
 H_PAD = 12
 ICON_GAP = 10
+BTN = 20
+BTN_GAP = 2
 
 
 class MenuRow(QWidget):
     delete_requested = pyqtSignal(object)
+    action_requested = pyqtSignal(object, str)
 
     def __init__(
         self,
@@ -25,6 +31,7 @@ class MenuRow(QWidget):
         width: int = 360,
         dim: bool = False,
         deletable: bool = False,
+        buttons: list | None = None,
     ):
         super().__init__()
         self.setObjectName("menuRow")
@@ -34,10 +41,16 @@ class MenuRow(QWidget):
 
         self._bg = theme.chrome
         self._hover = theme.hover
+        self._border = theme.border
         self._title_color = theme.subtext if dim else theme.text
         self._sub_color = theme.subtext
         self._strong_text = theme.text
-        self._deletable = bool(deletable)
+
+        specs = list(buttons) if buttons else []
+        if not specs and deletable:
+            specs = [{"id": "delete", "text": "\u00D7", "tooltip": "删除"}]
+        n = len(specs)
+        right_w = (n * BTN + (n - 1) * BTN_GAP) if n else RIGHT_RESERVED
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(H_PAD, 6, H_PAD, 6)
@@ -48,7 +61,9 @@ class MenuRow(QWidget):
         lay.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
         self._set_icon(icon)
 
-        text_w = width - 2 * H_PAD - ICON - ICON_GAP - RIGHT_RESERVED - ICON_GAP
+        text_w = width - 2 * H_PAD - ICON - ICON_GAP - right_w
+        if n:
+            text_w -= ICON_GAP
         if text_w < 60:
             text_w = 60
 
@@ -74,22 +89,42 @@ class MenuRow(QWidget):
 
         lay.addLayout(col, 1)
 
-        self._delete_btn = QToolButton(self)
-        if deletable:
-            self._delete_btn.setObjectName("menuRowDelete")
-            self._delete_btn.setText("\u00D7")
-            self._delete_btn.setToolTip("删除")
-            self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._delete_btn.setFixedSize(RIGHT_RESERVED - 4, RIGHT_RESERVED - 4)
-            self._delete_btn.setVisible(False)
-            self._delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
-            lay.addWidget(self._delete_btn)
-        else:
-            self._right = QWidget(self)
-            self._right.setFixedWidth(RIGHT_RESERVED)
-            lay.addWidget(self._right)
+        self._buttons: list[QToolButton] = []
+        self._button_ids: list[str] = []
+        if n:
+            box = QHBoxLayout()
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(BTN_GAP)
+            for spec in specs:
+                btn = QToolButton(self)
+                btn.setObjectName("menuRowBtn")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedSize(BTN, BTN)
+                btn.setVisible(False)
+                if spec.get("icon") is not None:
+                    btn.setIcon(spec["icon"])
+                    btn.setIconSize(QSize(BTN - 4, BTN - 4))
+                if spec.get("text"):
+                    btn.setText(spec["text"])
+                btn.setToolTip(spec.get("tooltip", ""))
+                bid = spec["id"]
+                btn.clicked.connect(lambda _=False, i=bid: self._emit_action(i))
+                box.addWidget(btn)
+                self._buttons.append(btn)
+                self._button_ids.append(bid)
+            lay.addLayout(box)
 
         self._apply_bg(self._bg)
+
+    def _emit_action(self, button_id: str) -> None:
+        self.action_requested.emit(self, button_id)
+        if button_id == "delete":
+            self.delete_requested.emit(self)
+
+    def set_highlight(self, on: bool) -> None:
+        self._apply_bg(self._hover if on else self._bg)
+        for btn in self._buttons:
+            btn.setVisible(on)
 
     def _set_icon(self, icon) -> None:
         if icon is None:
@@ -110,17 +145,12 @@ class MenuRow(QWidget):
         pixmap.setDevicePixelRatio(dpr)
         self._icon_label.setPixmap(pixmap)
 
-    def set_highlight(self, on: bool) -> None:
-        self._apply_bg(self._hover if on else self._bg)
-        if self._deletable:
-            self._delete_btn.setVisible(on)
-
     def _apply_bg(self, bg: str) -> None:
         self.setStyleSheet(
             f"#menuRow {{ background: {bg}; }}"
             f"#menuRowTitle {{ color: {self._title_color}; font-size: 13px; }}"
             f"#menuRowSub {{ color: {self._sub_color}; font-size: 11px; }}"
-            f"#menuRowDelete {{ color: {self._sub_color}; background: transparent;"
-            f" border: 0; border-radius: 4px; font-size: 13px; }}"
-            f"#menuRowDelete:hover {{ background: {self._hover}; color: {self._strong_text}; }}"
+            f"#menuRowBtn {{ background: transparent; border: 0; border-radius: 4px;"
+            f" font-size: 13px; }}"
+            f"#menuRowBtn:hover {{ background: {self._border}; }}"
         )
