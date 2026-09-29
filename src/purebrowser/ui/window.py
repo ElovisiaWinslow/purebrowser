@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
+    QLabel,
     QMainWindow,
     QMenu,
     QProgressBar,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QToolBar,
     QToolButton,
+    QWidget,
 )
 
 from purebrowser.core.interceptor import Blocker
@@ -59,6 +61,21 @@ if IS_WINDOWS:
     HWND_TOP = 0
 
     MONITOR_DEFAULTTONEAREST = 0x00000002
+
+    # --- 窗口消息 / 命中测试（方案 B：保留 WS_OVERLAPPEDWINDOW，自绘标题栏） ---
+    WM_NCCALCSIZE = 0x0083
+    WM_NCHITTEST = 0x0084
+
+    HTCLIENT = 1
+    HTCAPTION = 2
+    HTLEFT = 10
+    HTRIGHT = 11
+    HTTOP = 12
+    HTTOPLEFT = 13
+    HTTOPRIGHT = 14
+    HTBOTTOM = 15
+    HTBOTTOMLEFT = 16
+    HTBOTTOMRIGHT = 17
 
     class _WINDOWPLACEMENT(ctypes.Structure):
         _fields_ = [
@@ -126,6 +143,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PureBrowser")
         self.resize(1200, 800)
+        self.setMinimumSize(800, 600)
 
         # 全屏控制器状态（唯一来源）。原生 API 改窗口后 Qt 不知情，
         # 因此 isFullScreen() 恒为 False，用这个标志替代。
@@ -180,6 +198,7 @@ class MainWindow(QMainWindow):
         self.tabs.setAutoFillBackground(True)
 
         self._build_toolbar()
+        self._build_title_bar()
         self._build_statusbar()
         self._build_tab_plus()
         self._install_shortcuts()
@@ -263,6 +282,20 @@ class MainWindow(QMainWindow):
         self.progress.setMaximumWidth(160)
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
+
+    def _build_title_bar(self) -> None:
+        """独立自绘标题条（38px，位于工具栏之上）。
+
+        B-2.1a 只提供拖动/缩放命中区；窗口控制按钮在 B-2.1b/c 加入。
+        """
+        self.title_bar = QWidget(self)
+        self.title_bar.setObjectName("titleBar")
+        self.title_bar.setFixedHeight(38)
+        self.title_bar.setStyleSheet(
+            f"#titleBar {{ background: {self.theme.chrome};"
+            f" border-bottom: 1px solid {self.theme.border}; }}"
+        )
+        self.setMenuWidget(self.title_bar)
 
     def _build_tab_plus(self) -> None:
         """+ 按钮是 self.tabs 的子控件，动态跟随最后一个标签（带上限）。"""
@@ -434,8 +467,66 @@ class MainWindow(QMainWindow):
         self._relayout_tabs()
 
     # ---------- 原生 Win32 全屏控制器 ----------
+    def nativeEvent(self, eventType, message):
+        """方案 B：保留 WS_OVERLAPPEDWINDOW，用消息钩子实现自绘标题栏。
+
+        注意：本回调由 C++ 直接调用，任何 Python 异常逃逸都会触发
+        0xC000041D（fatal user callback exception）。因此这里整体 try/except，
+        且绝不调用 super().nativeEvent（PyQt6 下并非安全默认实现）。
+        """
+        try:
+            if IS_WINDOWS and bytes(eventType) == b"windows_generic_MSG":
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == WM_NCCALCSIZE and msg.wParam:
+                    return True, 0  # 客户区铺满整个窗口 → 去掉系统 caption
+                if msg.message == WM_NCHITTEST:
+                    return True, self._native_hit_test(msg)
+        except Exception:
+            pass
+        return False, 0
+
+    def _native_hit_test(self, msg) -> int:
+        """屏幕物理坐标 → 窗口本地逻辑坐标后判定命中区（含 150% DPI 换算）。"""
+        gx = ctypes.c_short(msg.lParam & 0xFFFF).value
+        gy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+        wh = self.windowHandle()
+        dpr = wh.devicePixelRatio() if wh is not None else 1.0
+        if dpr <= 0:
+            dpr = 1.0
+        local = self.mapFromGlobal(
+            QPoint(int(round(gx / dpr)), int(round(gy / dpr)))
+        )
+        x, y = local.x(), local.y()
+        w, h = self.width(), self.height()
+        b = 8  # 缩放边框（逻辑像素）
+        left = x < b
+        right = x >= w - b
+        top = y < b
+        bottom = y >= h - b
+        if top and left:
+            return HTTOPLEFT
+        if top and right:
+            return HTTOPRIGHT
+        if bottom and left:
+            return HTBOTTOMLEFT
+        if bottom and right:
+            return HTBOTTOMRIGHT
+        if left:
+            return HTLEFT
+        if right:
+            return HTRIGHT
+        if top:
+            return HTTOP
+        if bottom:
+            return HTBOTTOM
+        tb = getattr(self, "title_bar", None)
+        if tb is not None and tb.geometry().contains(local):
+            return HTCAPTION
+        return HTCLIENT
+
     def _hide_chrome(self) -> None:
         self.toolbar.hide()
+        self.title_bar.hide()
         self.tabs.tabBar().hide()
         self.statusBar().hide()
         self.tabs.setStyleSheet(
@@ -444,6 +535,7 @@ class MainWindow(QMainWindow):
 
     def _show_chrome(self) -> None:
         self.toolbar.show()
+        self.title_bar.show()
         self.tabs.tabBar().show()
         self.statusBar().show()
         self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
