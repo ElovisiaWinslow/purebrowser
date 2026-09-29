@@ -135,6 +135,11 @@ if IS_WINDOWS:
         ctypes.POINTER(_MONITORINFO),
     ]
 
+    # DWM 合成同步（防 resize 时 DWM 拉伸旧帧底部像素）。
+    _dwmapi = ctypes.windll.dwmapi
+    _dwmapi.DwmFlush.restype = ctypes.c_long
+    _dwmapi.DwmFlush.argtypes = []
+
 
 def _fmt_ptr(value) -> str:
     if value is None:
@@ -497,6 +502,12 @@ class MainWindow(QMainWindow):
             if IS_WINDOWS and bytes(eventType) == b"windows_generic_MSG":
                 msg = wintypes.MSG.from_address(int(message))
                 if msg.message == WM_NCCALCSIZE and msg.wParam:
+                    # 阻塞到 DWM 完成一次合成，避免它在中间把旧帧底部像素拉伸填充新区域。
+                    # （Flutter 引擎在 Windows 上的做法；同步调用，仅此处使用。）
+                    try:
+                        _dwmapi.DwmFlush()
+                    except Exception:
+                        pass
                     return True, 0  # 客户区铺满整个窗口 → 去掉系统 caption
                 if msg.message == WM_ERASEBKGND:
                     return True, 1  # 由 Qt 负责重绘背景，禁止系统擦除
