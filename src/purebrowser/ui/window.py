@@ -440,13 +440,21 @@ class MainWindow(QMainWindow):
         n = self.tabs.count()
         if n == 0:
             return
+        # A：标签栏不可见时（如全屏隐藏）不重算，避免用宽度 0 误判 max_visible。
+        if not bar.isVisible():
+            return
         avail = bar.width() - AdaptiveTabBar.RESERVED
         if avail < AdaptiveTabBar.MIN_W:
             max_visible = 1
         else:
             max_visible = max(1, avail // AdaptiveTabBar.MIN_W)
+        # C：当前激活标签永远可见（否则 setTabVisible 会让 QTabWidget 自动切走激活标签）。
+        current = self.tabs.currentIndex()
         for i in range(n):
-            bar.setTabVisible(i, i < max_visible)
+            if i == current:
+                bar.setTabVisible(i, True)
+            else:
+                bar.setTabVisible(i, i < max_visible)
 
     def _position_tab_plus(self, *_args) -> None:
         bar = self.tabs.tabBar()
