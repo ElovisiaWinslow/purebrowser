@@ -5,7 +5,7 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
@@ -35,7 +35,7 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
-from purebrowser.ui.hud import ZoomHud
+from purebrowser.ui.hud import WheelZoomFilter, ZoomHud
 from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
@@ -476,6 +476,23 @@ class MainWindow(QMainWindow):
         self.zoom_hud = ZoomHud(self.tabs.stack())
         self.zoom_hud.step_requested.connect(self._zoom_step)
         self.zoom_hud.percent_requested.connect(self._zoom_to_percent)
+        # Ctrl+滚轮桥接到 _zoom_step。滚轮事件落点是 view 的 focusProxy，
+        # 但 focusProxy 在 view 首次显示后才存在且可能被替换，故按需安装。
+        self._wheel_filter = WheelZoomFilter(self._zoom_step)
+        self._wheel_targets: set = set()
+
+    def _ensure_wheel_filter(self, view) -> None:
+        fp = view.focusProxy()
+        if fp is None or fp in self._wheel_targets:
+            return
+        fp.installEventFilter(self._wheel_filter)
+        self._wheel_targets.add(fp)
+
+    def eventFilter(self, obj, event):
+        # view 首次显示/打磨后 focusProxy 才可用：此时挂上滚轮过滤器。
+        if event.type() in (QEvent.Type.Show, QEvent.Type.Polish):
+            self._ensure_wheel_filter(obj)
+        return super().eventFilter(obj, event)
 
     # ---------- 页面缩放 ----------
     def _site_zoom(self) -> dict:
@@ -1168,6 +1185,9 @@ class MainWindow(QMainWindow):
         tab.load_finished.connect(
             lambda _ok=False, t=tab: self._apply_site_zoom(t.view, t.view.url())
         )
+        tab.view.installEventFilter(self)
+        self._ensure_wheel_filter(tab.view)
+        QTimer.singleShot(0, lambda v=tab.view: self._ensure_wheel_filter(v))
         if page is None:
             tab.load(url)
         self._relayout_tabs()
@@ -1184,6 +1204,8 @@ class MainWindow(QMainWindow):
         w = self.tabs.widget(idx)
         self.tabs.removeTab(idx)
         self._tab_full_titles.pop(w, None)
+        if isinstance(w, Tab):
+            self._wheel_targets.discard(w.view.focusProxy())
         w.deleteLater()
         self._relayout_tabs()
 
@@ -1215,6 +1237,7 @@ class MainWindow(QMainWindow):
         # 缩放按 page 且跨导航保持，URL 一变就按站点应用（查不到则复位 1.0），
         # 避免上个站点的缩放泄漏到新站点。
         self._apply_site_zoom(tab.view, url)
+        self._ensure_wheel_filter(tab.view)
         if tab is self.tabs.currentWidget():
             self.url_bar.setText(display_url(url))
             self.url_bar.setCursorPosition(0)
@@ -1225,6 +1248,7 @@ class MainWindow(QMainWindow):
             self._hide_find_bar()
         tab = self.tabs.currentWidget()
         if isinstance(tab, Tab):
+            self._ensure_wheel_filter(tab.view)
             self.url_bar.setText(display_url(tab.current_url()))
             self._refresh_bookmark_icon()
 

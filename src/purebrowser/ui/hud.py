@@ -8,7 +8,7 @@ ZoomHud 目前的使用者；后续查找条可复用 FloatingHud（commit B）�
 - 挂到 tabs.stack() 上，父控件 resize 时自动重新定位。
 - show_briefly(ms) 显示后定时隐藏；鼠标悬停时暂停，离开后重新计时。
 """
-from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 _ZOOM_QSS = """
@@ -192,3 +192,38 @@ class ZoomHud(FloatingHud):
     def _end_edit(self) -> None:
         self._editor.setVisible(False)
         self._percent_btn.setVisible(True)
+
+
+class WheelZoomFilter(QObject):
+    """把 Ctrl+滚轮桥接到 on_step(direction)，并阻止 QtWebEngine 原生缩放。
+
+    非 Ctrl 滚轮返回 False，普通滚动不受影响。
+    """
+
+    STEP_UNITS = 120
+    THROTTLE_MS = 40
+
+    def __init__(self, on_step):
+        super().__init__()
+        self._on_step = on_step
+        self._acc = 0
+        self._last = QElapsedTimer()
+        self._last.start()
+
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.Type.Wheel:
+            return False
+        if not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            return False
+        dy = event.angleDelta().y() or event.pixelDelta().y()
+        if event.inverted():
+            dy = -dy
+        if dy == 0:
+            return True
+        self._acc += dy
+        if abs(self._acc) >= self.STEP_UNITS and self._last.elapsed() >= self.THROTTLE_MS:
+            direction = 1 if self._acc > 0 else -1
+            self._acc = 0
+            self._last.restart()
+            self._on_step(direction)
+        return True
