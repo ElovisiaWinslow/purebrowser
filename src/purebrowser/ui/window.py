@@ -4,9 +4,18 @@ import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QPalette, QShortcut
+from PyQt6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QPalette,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -26,6 +35,7 @@ from purebrowser.core.locations import settings_file
 from purebrowser.core.profile import build_profile
 from purebrowser.core.settings import SEARCH_ENGINES, Settings
 from purebrowser.data import bookmarks, history
+from purebrowser.data import favicons
 from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
 from purebrowser.pages.pages import PureBrowserSchemeHandler
@@ -226,6 +236,7 @@ class MainWindow(QMainWindow):
         bar.setExpanding(False)
         bar.setDrawBase(False)
         bar.setMinimumHeight(38)
+        bar.setIconSize(QSize(16, 16))
         bar.setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setMovable(True)
         self.tabs.setUsesScrollButtons(False)
@@ -1131,6 +1142,8 @@ class MainWindow(QMainWindow):
         tab.load_finished.connect(
             lambda _ok=False, t=tab: self._apply_site_zoom(t.view, t.view.url())
         )
+        tab.icon_changed.connect(lambda icon, t=tab: self._on_tab_icon(t, icon))
+        self._apply_tab_icon(tab)
         tab.view.installEventFilter(self)
         self._ensure_wheel_filter(tab.view)
         QTimer.singleShot(0, lambda v=tab.view: self._ensure_wheel_filter(v))
@@ -1158,6 +1171,36 @@ class MainWindow(QMainWindow):
     def _current(self) -> Tab:
         return self.tabs.currentWidget()  # type: ignore[return-value]
 
+    # ---------- favicons ----------
+    def _globe_icon(self) -> QIcon:
+        return icons.icon("globe", self.theme.subtext, 16)
+
+    def _apply_tab_icon(self, tab: Tab) -> None:
+        """按当前 host 的缓存图标回填标签；无缓存/空 host 用 globe 兜底。"""
+        idx = self.tabs.indexOf(tab)
+        if idx < 0:
+            return
+        host = urlparse(tab.view.url().toString()).hostname or ""
+        pixmap = favicons.get(self.conn, host) if host else None
+        icon = QIcon(pixmap) if pixmap is not None else self._globe_icon()
+        self.tabs.tabBar().setTabIcon(idx, icon)
+
+    def _on_tab_icon(self, tab: Tab, icon: QIcon) -> None:
+        """view.iconChanged → 归一化 PNG 落库 → 回填标签图标。"""
+        idx = self.tabs.indexOf(tab)
+        if idx < 0:
+            return
+        host = urlparse(tab.view.url().toString()).hostname or ""
+        if not host or icon is None or icon.isNull():
+            return
+        png = favicons.icon_to_png(icon)
+        if png is None:
+            return
+        favicons.save(self.conn, host, png)
+        pixmap = favicons.get(self.conn, host)
+        if pixmap is not None:
+            self.tabs.tabBar().setTabIcon(idx, QIcon(pixmap))
+
     def _set_tab_title(self, tab: Tab, title: str) -> None:
         self._tab_full_titles[tab] = title or "新标签页"
         self._elide_tab_titles()
@@ -1184,6 +1227,7 @@ class MainWindow(QMainWindow):
         # 避免上个站点的缩放泄漏到新站点。
         self._apply_site_zoom(tab.view, url)
         self._ensure_wheel_filter(tab.view)
+        self._apply_tab_icon(tab)
         if tab is self.tabs.currentWidget():
             self.url_bar.setText(display_url(url))
             self.url_bar.setCursorPosition(0)

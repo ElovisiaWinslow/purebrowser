@@ -1,6 +1,7 @@
 from urllib.parse import quote_plus
 
 from PyQt6.QtCore import QUrl, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
@@ -55,6 +56,7 @@ class Tab(QWidget):
     page_loaded = pyqtSignal(str, str)
     new_page_requested = pyqtSignal(QWebEnginePage)
     fullscreen_toggled = pyqtSignal(bool)
+    icon_changed = pyqtSignal(QIcon)
 
     def __init__(self, profile: QWebEngineProfile, parent=None, page: QWebEnginePage = None):
         super().__init__(parent)
@@ -77,6 +79,7 @@ class Tab(QWidget):
         self.view.urlChanged.connect(self.url_changed)
         self.view.loadStarted.connect(self.load_started)
         self.view.loadFinished.connect(self._on_finished)
+        self.view.iconChanged.connect(self.icon_changed)
 
     def _on_finished(self, ok: bool) -> None:
         self.load_finished.emit(ok)

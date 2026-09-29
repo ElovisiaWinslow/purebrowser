@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     title TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS favicons (
+    host TEXT PRIMARY KEY,
+    data BLOB NOT NULL,
+    fetched_at INTEGER NOT NULL
+);
 """
 
 
