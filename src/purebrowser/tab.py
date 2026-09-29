@@ -23,6 +23,7 @@ def to_url(text: str, search_template: str = DEFAULT_SEARCH) -> QUrl:
 
 class PurePage(QWebEnginePage):
     new_page_requested = pyqtSignal(QWebEnginePage)
+    fullscreen_toggled = pyqtSignal(bool)
 
     def __init__(self, profile: QWebEngineProfile, parent=None):
         super().__init__(profile, parent)
@@ -40,19 +41,10 @@ class PurePage(QWebEnginePage):
         )
 
     def _handle_fullscreen(self, request):
-        # B 站等视频站的"全屏"按钮会触发这个信号。
-        # 默认行为是丢弃请求，导致只有"网页全屏"没有真全屏。
+        # 只接受请求并转发信号。窗口状态的改变统一交给 MainWindow 处理。
+        # 见 window.py 的 enter_fullscreen / exit_fullscreen。
         request.accept()
-        view = self.view()
-        if view is None:
-            return
-        window = view.window()
-        if window is None:
-            return
-        if request.toggleOn():
-            window.showFullScreen()
-        else:
-            window.showNormal()
+        self.fullscreen_toggled.emit(request.toggleOn())
 
 
 class Tab(QWidget):
@@ -62,6 +54,7 @@ class Tab(QWidget):
     load_finished = pyqtSignal(bool)
     page_loaded = pyqtSignal(str, str)
     new_page_requested = pyqtSignal(QWebEnginePage)
+    fullscreen_toggled = pyqtSignal(bool)
 
     def __init__(self, profile: QWebEngineProfile, parent=None, page: QWebEnginePage = None):
         super().__init__(parent)
@@ -72,6 +65,7 @@ class Tab(QWidget):
         else:
             page.setParent(self.view)
         page.new_page_requested.connect(self.new_page_requested)
+        page.fullscreen_toggled.connect(self.fullscreen_toggled)
         self.view.setPage(page)
         self.view.page().setBackgroundColor(self.palette().window().color())
 
