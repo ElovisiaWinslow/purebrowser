@@ -1,0 +1,17 @@
+pyproject.toml
+src/purebrowser/__init__.py
+src/purebrowser/__main__.py
+src/purebrowser/app.py
+src/purebrowser/interceptor.py
+src/purebrowser/main.py
+src/purebrowser/newtab.py
+src/purebrowser/profile.py
+src/purebrowser/tab.py
+src/purebrowser/window.py
+src/purebrowser.egg-info/PKG-INFO
+src/purebrowser.egg-info/SOURCES.txt
+src/purebrowser.egg-info/dependency_links.txt
+src/purebrowser.egg-info/requires.txt
+src/purebrowser.egg-info/top_level.txt
+src/purebrowser/privacy/__init__.py
+src/purebrowser/privacy/flags.py

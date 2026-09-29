@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>新标签页</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center;
+    font: 16px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    background: Canvas; color: CanvasText;
+  }
+  form { display: flex; gap: 8px; width: min(640px, 80vw); }
+  input {
+    flex: 1; padding: 14px 16px; border-radius: 10px;
+    border: 1px solid color-mix(in oklab, CanvasText 20%, transparent);
+    background: color-mix(in oklab, Canvas 90%, CanvasText 10%);
+    color: inherit; font-size: 16px; outline: none;
+  }
+  input:focus { border-color: color-mix(in oklab, CanvasText 50%, transparent); }
+  button {
+    padding: 0 18px; border-radius: 10px; border: 0;
+    background: #2f6feb; color: white; font-weight: 600; cursor: pointer;
+  }
+  h1 { font-weight: 600; letter-spacing: -0.02em; margin-bottom: 24px; }
+</style>
+</head>
+<body>
+  <main style="text-align:center">
+    <h1>PureBrowser</h1>
+    <form onsubmit="event.preventDefault(); const q=this.q.value.trim();
+      if(!q) return false;
+      location.href = q.includes('.') && !q.includes(' ')
+        ? (q.includes('://') ? q : 'https://' + q)
+        : 'https://cn.bing.com/search?q=' + encodeURIComponent(q);
+      return false;">
+      <input name="q" autofocus placeholder="使用 Bing 搜索或输入网址" autocomplete="off">
+      <button type="submit">搜索</button>
+    </form>
+  </main>
+</body>
+</html>
