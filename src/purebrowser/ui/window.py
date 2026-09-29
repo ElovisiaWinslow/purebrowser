@@ -31,6 +31,7 @@ from purebrowser.pages.pages import PureBrowserSchemeHandler
 from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
+from purebrowser.ui.freeze_overlay import FreezeOverlay
 from purebrowser.ui.tab import Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
 from purebrowser.ui.urlbar import UrlBar
@@ -66,6 +67,8 @@ if IS_WINDOWS:
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
     WM_ERASEBKGND = 0x0014
+    WM_ENTERSIZEMOVE = 0x0231
+    WM_EXITSIZEMOVE = 0x0232
 
     HTCLIENT = 1
     HTCAPTION = 2
@@ -207,6 +210,9 @@ class MainWindow(QMainWindow):
         tabs_pal = self.tabs.palette()
         tabs_pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.chrome))
         self.tabs.setPalette(tabs_pal)
+
+        # 拖动 resize 期间覆盖内容区的冻结帧（只盖 self.tabs 的内容区，不含标签栏）。
+        self._freeze_overlay = FreezeOverlay(self.tabs)
 
         self._build_toolbar()
         self._build_title_bar()
@@ -476,6 +482,8 @@ class MainWindow(QMainWindow):
         )
         self.tabs.tabBar().update()
         self._relayout_tabs()
+        if getattr(self, "_freeze_overlay", None) is not None and self._freeze_overlay.isVisible():
+            self._sync_overlay_geometry()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def nativeEvent(self, eventType, message):
@@ -492,11 +500,46 @@ class MainWindow(QMainWindow):
                     return True, 0  # 客户区铺满整个窗口 → 去掉系统 caption
                 if msg.message == WM_ERASEBKGND:
                     return True, 1  # 由 Qt 负责重绘背景，禁止系统擦除
+                if msg.message == WM_ENTERSIZEMOVE:
+                    self._freeze_begin()
+                    return True, 0
+                if msg.message == WM_EXITSIZEMOVE:
+                    self._freeze_end()
+                    return True, 0
                 if msg.message == WM_NCHITTEST:
                     return True, self._native_hit_test(msg)
         except Exception:
             pass
         return False, 0
+
+    def _freeze_begin(self) -> None:
+        """用户开始拖动/调整窗口：抓当前 WebEngine 画面，用 overlay 拉伸显示。"""
+        if self._is_fullscreen:
+            return
+        if self.tabs.count() == 0:
+            return
+        view = self._current().view
+        if view is None or view.width() <= 0 or view.height() <= 0:
+            return
+        pixmap = view.grab()
+        self._freeze_overlay.setParent(self.tabs)
+        self._sync_overlay_geometry()
+        self._freeze_overlay.set_frame(pixmap)
+        self._freeze_overlay.show()
+        self._freeze_overlay.raise_()
+
+    def _freeze_end(self) -> None:
+        """用户松手：隐藏 overlay，恢复 WebEngine 实时渲染。"""
+        self._freeze_overlay.hide()
+        self._freeze_overlay.clear_frame()
+
+    def _sync_overlay_geometry(self) -> None:
+        # 只覆盖标签栏下方的内容区，不覆盖标签栏本身。
+        bar = self.tabs.tabBar()
+        top = bar.height() if bar.isVisible() else 0
+        self._freeze_overlay.setGeometry(
+            0, top, self.tabs.width(), max(0, self.tabs.height() - top)
+        )
 
     def _native_hit_test(self, msg) -> int:
         """屏幕物理坐标 → 窗口本地逻辑坐标后判定命中区（含 150% DPI 换算）。"""
