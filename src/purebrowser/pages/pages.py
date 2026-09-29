@@ -44,9 +44,9 @@ HISTORY_TEMPLATE = """<!doctype html>
 <title>历史记录</title>
 <style>
   __THEME_ROOT__
-  body { font: 14px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
+  body { font: 13px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
          background: var(--bg); color: var(--text); }
-  h1 { padding: 20px 24px 8px; font-size: 20px; margin: 0; }
+  h1 { padding: 20px 24px 8px; font-size: 18px; margin: 0; }
   ul { list-style: none; margin: 0; padding: 8px 24px 32px; }
   li { padding: 10px 0; border-bottom: 1px solid var(--border); }
   a { color: inherit; text-decoration: none; display: block; }
@@ -89,16 +89,16 @@ SETTINGS_TEMPLATE = """<!doctype html>
 <title>设置</title>
 <style>
   __THEME_ROOT__
-  body { font: 14px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
+  body { font: 13px system-ui, "Microsoft YaHei", sans-serif; margin: 0;
          background: var(--bg); color: var(--text); }
-  .container { max-width: 760px; margin: 0 auto; padding: 32px 24px; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 24px; }
-  section { margin-bottom: 24px; padding: 20px; border-radius: 10px;
+  .container { max-width: 760px; margin: 0 auto; padding: 28px 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 20px; }
+  section { margin-bottom: 18px; padding: 16px 18px; border-radius: 10px;
             background: var(--panel);
             border: 1px solid var(--border); }
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
   .row { display: flex; align-items: center; justify-content: space-between;
-         padding: 12px 0; gap: 16px; }
+         padding: 10px 0; gap: 16px; }
   .row + .row { border-top: 1px solid var(--border); }
   label { flex: 1; min-width: 0; }
   .desc { opacity: 0.65; font-size: 12px; margin-top: 2px; }

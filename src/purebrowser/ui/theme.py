@@ -31,7 +31,7 @@ class Theme:
 
 LIGHT = Theme(
     name="light",
-    window="#ECECEC",
+    window="#FFFFFF",
     chrome="#F5F5F7",
     text="#1D1D1F",
     subtext="#86868B",
@@ -92,14 +92,16 @@ QToolTip {
 QToolBar {
     background: $chrome; border: 0;
     border-bottom: 1px solid $border;
-    padding: 4px 6px; spacing: 2px;
+    padding: 6px 10px; spacing: 4px;
 }
 QToolBar::separator { background: $border; width: 1px; margin: 4px 6px; }
 QToolBar QToolButton {
     background: transparent; border: 0;
-    border-radius: $radius; padding: 4px 8px; color: $text;
+    min-width: 32px; min-height: 32px;
+    padding: 6px 10px; margin: 0 2px;
+    border-radius: 6px; font-size: 15px; color: $text;
 }
-QToolButton { color: $text; border-radius: $radius; }
+QToolButton { color: $text; border-radius: 6px; }
 QToolButton:hover { background: $hover; }
 QToolButton:pressed, QToolButton:checked { background: $border; }
 QToolButton::menu-indicator { image: none; }
@@ -108,10 +110,15 @@ QTabWidget::pane { border: 0; background: $window; }
 QTabBar { background: $chrome; qproperty-drawBase: 0; }
 QTabBar::tab {
     background: transparent; color: $subtext; border: 0;
-    border-top-left-radius: $panel; border-top-right-radius: $panel;
-    padding: 6px 14px; margin: 4px 2px 0 2px; min-width: 90px;
+    height: 30px; min-width: 120px; max-width: 220px;
+    padding: 0 12px; margin: 4px 2px 0 2px;
+    border-top-left-radius: 12px; border-top-right-radius: 12px;
+    font-size: 12px; font-weight: 500;
 }
-QTabBar::tab:selected { background: $window; color: $text; }
+QTabBar::tab:selected {
+    background: $window; color: $text;
+    border-bottom: 2px solid $accent;
+}
 QTabBar::tab:hover:!selected { background: $hover; }
 QTabBar::close-button { background: transparent; }
 

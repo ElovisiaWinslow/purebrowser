@@ -4,10 +4,11 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import QSize, Qt, QUrl
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
+    QGraphicsDropShadowEffect,
     QMainWindow,
     QMenu,
     QProgressBar,
@@ -157,6 +158,10 @@ class MainWindow(QMainWindow):
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setExpanding(False)
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.tabBar().setMinimumHeight(38)
+        self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._sync_from_tab)
@@ -172,6 +177,8 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar("Main", self)
         self.toolbar.setMovable(False)
+        self.toolbar.setIconSize(QSize(18, 18))
+        self.toolbar.setFixedHeight(46)
         self.addToolBar(self.toolbar)
 
         self.back = self.toolbar.addAction("←")
@@ -220,6 +227,19 @@ class MainWindow(QMainWindow):
 
         settings_action = self.toolbar.addAction("⚙")
         settings_action.triggered.connect(self._open_settings)
+
+        self._apply_shadow(self.toolbar)
+        self._apply_shadow(self.history_menu)
+        self._apply_shadow(self.bookmarks_menu)
+        self._apply_shadow(self.download_menu)
+
+    @staticmethod
+    def _apply_shadow(widget, blur: int = 12, dy: int = 2, alpha: int = 30) -> None:
+        effect = QGraphicsDropShadowEffect(widget)
+        effect.setBlurRadius(blur)
+        effect.setOffset(0, dy)
+        effect.setColor(QColor(0, 0, 0, alpha))
+        widget.setGraphicsEffect(effect)
 
     def _build_statusbar(self) -> None:
         self.progress = QProgressBar(self)

@@ -14,6 +14,8 @@ class UrlBar(QLineEdit):
         self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
         self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.setCompleter(self._completer)
+        self.setMinimumHeight(34)
+        self.setStyleSheet("padding: 6px 14px; font-size: 13px; border-radius: 8px;")
         self.textEdited.connect(self._refresh)
 
     def _refresh(self, text: str) -> None:
