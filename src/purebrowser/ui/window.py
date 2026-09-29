@@ -28,6 +28,7 @@ from purebrowser.pages.pages import PureBrowserSchemeHandler
 from purebrowser.data.storage import connect
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.tab import Tab, to_url
+from purebrowser.ui.tabbar import AdaptiveTabBar
 from purebrowser.ui.urlbar import UrlBar
 
 # ---------------------------------------------------------------------------
@@ -155,9 +156,11 @@ class MainWindow(QMainWindow):
         self.downloads.changed.connect(self._refresh_download_button)
 
         self.tabs = QTabWidget(self)
+        self.tabs.setTabBar(AdaptiveTabBar(self.tabs))
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
+        self.tabs.setUsesScrollButtons(False)
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setDrawBase(False)
         self.tabs.tabBar().setMinimumHeight(38)
@@ -331,6 +334,7 @@ class MainWindow(QMainWindow):
         self._fs_log(
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
+        self.tabs.tabBar().update()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def _hide_chrome(self) -> None:
