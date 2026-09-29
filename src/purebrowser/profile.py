@@ -24,9 +24,18 @@ def build_profile(
     profile.setPersistentStoragePath(str(storage_dir / "storage"))
     profile.setCachePath(str(storage_dir / "cache"))
     profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
+
+    # 保留持久 cookie，让登录状态跨会话保持。
+    # AllowPersistentCookies 是正常浏览器行为：
+    #   - 带过期时间的 cookie 落盘，重开浏览器仍在
+    #   - 会话 cookie 关窗口即失效
+    #
+    # 注意：不要改回 NoPersistentCookies。那会清空所有 cookie，
+    # 导致每次打开 B 站都要重新登录。见 AGENTS.md 第二节。
     profile.setPersistentCookiesPolicy(
-        QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
+        QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
     )
+
     profile.setHttpUserAgent(FAKE_UA)
     profile.setUrlRequestInterceptor(interceptor)
 

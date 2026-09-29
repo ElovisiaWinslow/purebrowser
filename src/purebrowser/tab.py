@@ -27,6 +27,7 @@ class PurePage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, parent=None):
         super().__init__(profile, parent)
         self.featurePermissionRequested.connect(self._deny)
+        self.fullScreenRequested.connect(self._handle_fullscreen)
 
     def createWindow(self, _type):
         page = PurePage(self.profile())
@@ -37,6 +38,21 @@ class PurePage(QWebEnginePage):
         self.setFeaturePermission(
             origin, feature, QWebEnginePage.PermissionPolicy.PermissionDeniedByUser
         )
+
+    def _handle_fullscreen(self, request):
+        # B 站等视频站的"全屏"按钮会触发这个信号。
+        # 默认行为是丢弃请求，导致只有"网页全屏"没有真全屏。
+        request.accept()
+        view = self.view()
+        if view is None:
+            return
+        window = view.window()
+        if window is None:
+            return
+        if request.toggleOn():
+            window.showFullScreen()
+        else:
+            window.showNormal()
 
 
 class Tab(QWidget):

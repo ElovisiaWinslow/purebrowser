@@ -332,3 +332,17 @@ PureBrowser 的目标用户是：
 
 若输出 `(不支持)` 或 `[FAIL]`，**立即停止改动**，报告用户。
 这意味着自编译 QtWebEngine 被污染，或某个依赖 DLL 缺失。
+
+---
+
+## 附录 B：用户明确许可的改动（2026-09-29）
+
+以下改动经用户明确许可，与主体约束不冲突：
+
+1. **`profile.py` 的 cookie 策略**：从 `NoPersistentCookies` 改为 `AllowPersistentCookies`。
+   原因：修复"每次打开 B 站都要重新登录"。
+   红线：**不要改回 `NoPersistentCookies`。**
+
+2. **`tab.py` 的全屏支持**：新增 `PurePage._handle_fullscreen`，接受全屏请求。
+   原因：修复 B 站视频只有"网页全屏"没有真全屏。
+   红线：**不要删除 `fullScreenRequested.connect(...)` 这一行。**
