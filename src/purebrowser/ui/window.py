@@ -371,13 +371,15 @@ class MainWindow(QMainWindow):
         btn.clicked.connect(slot)
         return btn
 
-    def _update_max_icon(self) -> None:
+    def _set_max_icon(self, maximized: bool) -> None:
         if not hasattr(self, "win_max"):
             return
-        maximized = self.isMaximized()
         name = "restore" if maximized else "maximize"
         self.win_max.set_icons(icons.icon(name, self.theme.text, 10), None)
         self.win_max.setToolTip("还原" if maximized else "最大化")
+
+    def _update_max_icon(self) -> None:
+        self._set_max_icon(self.isMaximized())
 
     @staticmethod
     def _snap_supported() -> bool:
@@ -387,15 +389,15 @@ class MainWindow(QMainWindow):
             return False
 
     def _toggle_maximize(self) -> None:
+        # isMaximized() 会滞后一拍，先用它算出"本次意图"，再据此设置图标（B）。
+        will_max = not self.isMaximized()
         if not IS_WINDOWS:
-            self.showNormal() if self.isMaximized() else self.showMaximized()
+            self.showMaximized() if will_max else self.showNormal()
+            self._set_max_icon(will_max)
             return
         hwnd = self._hwnd()
-        if self.isMaximized():
-            _user32.ShowWindow(hwnd, SW_RESTORE)
-        else:
-            _user32.ShowWindow(hwnd, SW_MAXIMIZE)
-        self._update_max_icon()
+        _user32.ShowWindow(hwnd, SW_MAXIMIZE if will_max else SW_RESTORE)
+        self._set_max_icon(will_max)
 
     def _build_tab_plus(self) -> None:
         """+ 按钮是 self.tabs 的子控件，动态跟随最后一个标签（带上限）。"""
@@ -557,8 +559,9 @@ class MainWindow(QMainWindow):
             names.append("NoState(Normal)")
         raw = getattr(state, "value", state)
         self._fs_log(f"windowStateChanged -> {'|'.join(names)} (raw={raw})")
+        # 用信号自带的 state 判定（isMaximized() 此时可能仍滞后）——方案 A。
         try:
-            self._update_max_icon()
+            self._set_max_icon(bool(state & Qt.WindowState.WindowMaximized))
         except Exception:
             pass
 
