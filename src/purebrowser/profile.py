@@ -31,7 +31,7 @@ def build_profile(
     #   - 会话 cookie 关窗口即失效
     #
     # 注意：不要改回 NoPersistentCookies。那会清空所有 cookie，
-    # 导致每次打开 B 站都要重新登录。见 AGENTS.md 第二节。
+    # 导致每次打开 B 站都要重新登录。见 AGENTS.md 附录 B。
     profile.setPersistentCookiesPolicy(
         QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
     )
@@ -47,5 +47,11 @@ def build_profile(
     s.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
     s.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True)
     s.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
+
+    # 关键：启用 Fullscreen API。
+    # 不开这一项，document.fullscreenEnabled 返回 false，
+    # B 站等站点就不渲染全屏按钮，只留"网页全屏"。
+    # 见 AGENTS.md 附录 B。
+    s.setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
 
     return profile
