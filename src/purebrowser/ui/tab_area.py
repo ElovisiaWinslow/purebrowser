@@ -44,16 +44,18 @@ class TabArea(QWidget):
             bar.deleteLater()
 
     def setTabsClosable(self, flag) -> None:
-        # 使用自建关闭键（_install_tab_close），内建关闭键不用。
+        # 兼容旧调用保留为 no-op：使用自建关闭键（_install_tab_close），内建关闭键不用。
         pass
 
     def setMovable(self, flag) -> None:
         self._bar.setMovable(flag)
 
     def setDocumentMode(self, flag) -> None:
-        self._bar.setDrawBase(not flag)
+        # 兼容旧调用保留为 no-op：QTabBar 无 documentMode。
+        pass
 
     def setUsesScrollButtons(self, flag) -> None:
+        # 兼容旧调用保留（转发给 QTabBar，功能有效，非 no-op）。
         self._bar.setUsesScrollButtons(flag)
 
     def setTabText(self, index, text) -> None:

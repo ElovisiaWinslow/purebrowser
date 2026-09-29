@@ -11,13 +11,10 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMenu,
     QProgressBar,
-    QStackedWidget,
     QTabBar,
-    QTabWidget,
     QToolBar,
     QToolButton,
     QVBoxLayout,
