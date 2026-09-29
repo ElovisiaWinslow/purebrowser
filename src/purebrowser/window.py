@@ -1,8 +1,10 @@
+import ctypes
 import os
 import time
+from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
@@ -26,6 +28,93 @@ from .storage import connect
 from .tab import Tab, to_url
 from .urlbar import UrlBar
 
+# ---------------------------------------------------------------------------
+# 原生 Win32 全屏支持（ctypes，标准库，不引入新依赖）。
+# 仅 Windows 有效。进入/退出都走原生 API，不再混用 Qt 的 show* / setWindowState，
+# 否则两套状态机会失配。
+# ---------------------------------------------------------------------------
+IS_WINDOWS = os.name == "nt"
+
+if IS_WINDOWS:
+    _user32 = ctypes.windll.user32
+
+    GWL_STYLE = -16
+
+    WS_OVERLAPPEDWINDOW = 0x00CF0000
+    WS_CAPTION = 0x00C00000
+    WS_THICKFRAME = 0x00040000
+    WS_MINIMIZEBOX = 0x00020000
+    WS_MAXIMIZEBOX = 0x00010000
+    WS_SYSMENU = 0x00080000
+
+    SWP_NOSIZE = 0x0001
+    SWP_NOMOVE = 0x0002
+    SWP_NOZORDER = 0x0004
+    SWP_FRAMECHANGED = 0x0020
+    HWND_TOP = 0
+
+    MONITOR_DEFAULTTONEAREST = 0x00000002
+
+    class _WINDOWPLACEMENT(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.UINT),
+            ("flags", wintypes.UINT),
+            ("showCmd", wintypes.UINT),
+            ("ptMinPosition", wintypes.POINT),
+            ("ptMaxPosition", wintypes.POINT),
+            ("rcNormalPosition", wintypes.RECT),
+        ]
+
+    class _MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    _user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+    _user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+    _user32.SetWindowLongPtrW.argtypes = [
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_void_p,
+    ]
+    _user32.GetWindowPlacement.restype = wintypes.BOOL
+    _user32.GetWindowPlacement.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(_WINDOWPLACEMENT),
+    ]
+    _user32.SetWindowPlacement.restype = wintypes.BOOL
+    _user32.SetWindowPlacement.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(_WINDOWPLACEMENT),
+    ]
+    _user32.SetWindowPos.restype = wintypes.BOOL
+    _user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    _user32.MonitorFromWindow.restype = ctypes.c_void_p
+    _user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    _user32.GetMonitorInfoW.restype = wintypes.BOOL
+    _user32.GetMonitorInfoW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_MONITORINFO),
+    ]
+
+
+def _fmt_ptr(value) -> str:
+    if value is None:
+        return "0x0(None)"
+    return f"0x{int(value) & 0xFFFFFFFFFFFFFFFF:016X}"
+
 
 class MainWindow(QMainWindow):
     def __init__(self, data_dir: Path):
@@ -33,17 +122,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PureBrowser")
         self.resize(1200, 800)
 
-        # 全屏控制器状态（唯一来源）
-        self._restore_maximized = False
+        # 全屏控制器状态（唯一来源）。原生 API 改窗口后 Qt 不知情，
+        # 因此 isFullScreen() 恒为 False，用这个标志替代。
+        self._is_fullscreen = False
         self._fullscreen_source = None
+        self._saved_placement = None
+        self._saved_style = None
 
         # 全屏时序调试探针（PUREBROWSER_FS_DEBUG=1 开启）
         self._fs_debug = bool(os.environ.get("PUREBROWSER_FS_DEBUG", "").strip())
         self._fs_t0 = None
         self._fs_probe_connected = False
-
-        # 退出全屏恢复最大化时，等待最大化状态确认后再显示窗口
-        self._pending_restore_show = False
 
         self.data_dir = Path(data_dir)
         self.conn = connect(self.data_dir / "purebrowser.db")
@@ -206,18 +295,13 @@ class MainWindow(QMainWindow):
         raw = getattr(state, "value", state)
         self._fs_log(f"windowStateChanged -> {'|'.join(names)} (raw={raw})")
 
-        if self._pending_restore_show and (state & Qt.WindowState.WindowMaximized):
-            self._pending_restore_show = False
-            self.show()
-            self._show_chrome()
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fs_log(
+            f"resizeEvent {event.size().width()}x{event.size().height()}"
+        )
 
-    def _force_restore_show(self) -> None:
-        if self._pending_restore_show:
-            self._pending_restore_show = False
-            self.show()
-            self._show_chrome()
-
-    # ---------- fullscreen 统一控制器 ----------
+    # ---------- 原生 Win32 全屏控制器 ----------
     def _hide_chrome(self) -> None:
         self.toolbar.hide()
         self.tabs.tabBar().hide()
@@ -232,42 +316,137 @@ class MainWindow(QMainWindow):
         self.statusBar().show()
         self.tabs.setStyleSheet("QTabWidget::pane { border: 0; }")
 
-    def enter_fullscreen(self, source: str = "video") -> None:
-        """统一的全屏入口。source: 'video' | 'hotkey'，仅用于标记，不影响行为。"""
-        if self.isFullScreen():
-            return
-        self._restore_maximized = self.isMaximized()
-        self._fullscreen_source = source
+    def _hwnd(self):
+        return wintypes.HWND(int(self.winId()))
+
+    def _monitor_rect(self):
+        """窗口所在显示器的物理像素矩形 (x, y, w, h)。"""
+        hwnd = self._hwnd()
+        mon = _user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if mon and _user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+            r = info.rcMonitor
+            return r.left, r.top, r.right - r.left, r.bottom - r.top
+        scr = self.screen()
+        if scr is None:
+            from PyQt6.QtGui import QGuiApplication
+
+            scr = QGuiApplication.primaryScreen()
+        g = scr.geometry()
+        return g.x(), g.y(), g.width(), g.height()
+
+    def _log_qt_state(self, tag: str) -> None:
         self._fs_log(
-            f"enter_fullscreen source={source} restore_maximized={self._restore_maximized}"
+            f"{tag}: qt windowState={int(self.windowState().value)} "
+            f"isMaximized={self.isMaximized()} isFullScreen={self.isFullScreen()} "
+            f"_is_fullscreen={self._is_fullscreen}"
         )
-        self.showFullScreen()
+
+    def _native_enter_fullscreen(self) -> None:
+        if not IS_WINDOWS:
+            self.showFullScreen()
+            self._is_fullscreen = True
+            self._hide_chrome()
+            return
+
+        hwnd = self._hwnd()
+        placement = _WINDOWPLACEMENT()
+        placement.length = ctypes.sizeof(_WINDOWPLACEMENT)
+        if not _user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
+            self._fs_log("enter: GetWindowPlacement FAILED")
+            return
+        self._saved_placement = placement
+        rn = placement.rcNormalPosition
+        self._fs_log(
+            f"enter: GetWindowPlacement ok showCmd={placement.showCmd} "
+            f"rcNormal=({rn.left},{rn.top},{rn.right},{rn.bottom})"
+        )
+
+        style = _user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
+        if style is None:
+            self._fs_log("enter: GetWindowLongPtrW FAILED")
+            return
+        self._saved_style = style
+        strip = (
+            WS_OVERLAPPEDWINDOW
+            | WS_CAPTION
+            | WS_THICKFRAME
+            | WS_MINIMIZEBOX
+            | WS_MAXIMIZEBOX
+            | WS_SYSMENU
+        )
+        new_style = style & ~strip
+        prev = _user32.SetWindowLongPtrW(hwnd, GWL_STYLE, new_style)
+        self._fs_log(
+            f"enter: SetWindowLongPtrW prev={_fmt_ptr(prev)} new={_fmt_ptr(new_style)}"
+        )
+
+        x, y, w, h = self._monitor_rect()
+        ok = _user32.SetWindowPos(
+            hwnd, HWND_TOP, x, y, w, h, SWP_FRAMECHANGED | SWP_NOZORDER
+        )
+        self._fs_log(
+            f"enter: monitor=({x},{y},{w},{h}) SetWindowPos ok={bool(ok)}"
+        )
+
+        self._is_fullscreen = True
         self._hide_chrome()
+        self._log_qt_state("enter done")
+
+    def _native_exit_fullscreen(self) -> None:
+        if not IS_WINDOWS:
+            self.showNormal()
+            self._is_fullscreen = False
+            self._show_chrome()
+            return
+
+        hwnd = self._hwnd()
+        if self._saved_style is not None:
+            prev = _user32.SetWindowLongPtrW(hwnd, GWL_STYLE, self._saved_style)
+            self._fs_log(f"exit: SetWindowLongPtrW restore prev={_fmt_ptr(prev)}")
+
+        if self._saved_placement is not None:
+            ok = _user32.SetWindowPlacement(hwnd, ctypes.byref(self._saved_placement))
+            self._fs_log(
+                f"exit: SetWindowPlacement ok={bool(ok)} "
+                f"showCmd={self._saved_placement.showCmd}"
+            )
+
+        ok = _user32.SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        )
+        self._fs_log(f"exit: SetWindowPos refresh ok={bool(ok)}")
+
+        self._saved_placement = None
+        self._saved_style = None
+        self._is_fullscreen = False
+        self._show_chrome()
+        self._log_qt_state("exit done")
+
+    def enter_fullscreen(self, source: str = "video") -> None:
+        """统一全屏入口。source: 'video' | 'hotkey'，仅用于标记。"""
+        if self._is_fullscreen:
+            return
+        self._fullscreen_source = source
+        self._fs_log(f"enter_fullscreen source={source}")
+        self._native_enter_fullscreen()
 
     def exit_fullscreen(self) -> None:
-        """统一的退出全屏入口。"""
-        if not self.isFullScreen():
+        """统一退出全屏入口。"""
+        if not self._is_fullscreen:
             return
-        self._fs_log(
-            f"exit_fullscreen restore_maximized={self._restore_maximized}"
-        )
-        if self._restore_maximized:
-            # Windows/Qt 从全屏退出会分两步：全屏 -> 普通 -> 最大化，
-            # 中间"普通窗口"帧会被 DWM 合成出来，形成可见的中间态。
-            # 先隐藏窗口，切换状态，等最大化状态确认后再显示，
-            # 保证中间帧永远不会被合成出来。
-            self.hide()
-            self._pending_restore_show = True
-            self.setWindowState(Qt.WindowState.WindowMaximized)
-            QTimer.singleShot(150, self._force_restore_show)
-        else:
-            self.showNormal()
-            self._show_chrome()
-        self._restore_maximized = False
-        self._fullscreen_source = None
+        self._fs_log("exit_fullscreen")
+        self._native_exit_fullscreen()
 
     def _toggle_fullscreen(self) -> None:
-        if self.isFullScreen():
+        if self._is_fullscreen:
             self.exit_fullscreen()
         else:
             self.enter_fullscreen(source="hotkey")
