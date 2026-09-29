@@ -172,6 +172,21 @@ SETTINGS_TEMPLATE = """<!doctype html>
   </section>
 
   <section>
+    <h2>启动</h2>
+    <div class="row">
+      <label>
+        恢复上次会话
+        <div class="desc">启动时重新打开上次关闭的标签页</div>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="restore"
+               onchange="save('restore_session', this.checked)">
+        <span></span>
+      </label>
+    </div>
+  </section>
+
+  <section>
     <h2>搜索引擎</h2>
     <div class="row">
       <label>
@@ -258,6 +273,7 @@ function clearHistory(btn) {
 
 document.getElementById('interceptor').checked = __INTERCEPTOR__;
 document.getElementById('doh').checked = __DOH__;
+document.getElementById('restore').checked = __RESTORE__;
 document.getElementById('theme').value = "__THEME__";
 </script>
 </body></html>
@@ -301,6 +317,7 @@ def _settings_html(settings, data_dir: Path, theme=None) -> str:
         .replace("__ENGINES__", engine_options)
         .replace("__INTERCEPTOR__", "true" if d["interceptor_enabled"] else "false")
         .replace("__DOH__", "true" if d["doh_enabled"] else "false")
+        .replace("__RESTORE__", "true" if d.get("restore_session", True) else "false")
         .replace("__THEME__", str(d.get("theme", "system")))
         .replace("__DATA_DIR__", str(data_dir))
         .replace("__DOWNLOAD_DIR__", download_dir)

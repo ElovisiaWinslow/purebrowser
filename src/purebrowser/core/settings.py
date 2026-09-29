@@ -8,6 +8,7 @@ DEFAULTS = {
     "download_dir": "",
     "theme": "system",  # "system" | "light" | "dark"
     "site_zoom": {},  # host -> zoom factor, e.g. {"www.bilibili.com": 1.5}
+    "restore_session": True,  # reopen previous tabs on startup
 }
 
 SEARCH_ENGINES = {
@@ -17,7 +18,7 @@ SEARCH_ENGINES = {
     "google": "https://www.google.com/search?q={q}",
 }
 
-_BOOL_KEYS = ("interceptor_enabled", "doh_enabled")
+_BOOL_KEYS = ("interceptor_enabled", "doh_enabled", "restore_session")
 
 
 class Settings:

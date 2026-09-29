@@ -39,6 +39,7 @@ from purebrowser.core.settings import SEARCH_ENGINES, Settings
 from purebrowser.data import bookmarks, history
 from purebrowser.data import downloads_store
 from purebrowser.data import favicons
+from purebrowser.data import session
 from purebrowser.pages.downloads import DownloadManager
 from purebrowser.pages.newtab import NEWTAB_URL, display_url
 from purebrowser.pages.pages import PureBrowserSchemeHandler
@@ -221,6 +222,7 @@ class MainWindow(QMainWindow):
         self.settings = Settings(settings_file())
         self.theme = theme_mod.resolve_theme(self.settings.get("theme", "system"))
         self._tab_full_titles: dict = {}
+        self._tab_urls: dict = {}
 
         netlog_env = os.environ.get("PUREBROWSER_NETLOG", "").strip()
         netlog_path = Path(netlog_env) if netlog_env else None
@@ -297,7 +299,14 @@ class MainWindow(QMainWindow):
         self._build_tab_plus()
         self._install_shortcuts()
 
-        self.new_tab(NEWTAB_URL)
+        # 最近关闭标签栈（内存，仅记用户主动关闭的标签）与会话 debounce 定时器。
+        self._closed_tabs: list = []
+        self._session_timer = QTimer(self)
+        self._session_timer.setSingleShot(True)
+        self._session_timer.setInterval(800)
+        self._session_timer.timeout.connect(self._save_session)
+
+        self._restore_session()
 
         self._relayout_tabs()
         self._update_max_icon()
@@ -701,6 +710,9 @@ class MainWindow(QMainWindow):
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(
             lambda: self.new_tab(NEWTAB_URL)
+        )
+        QShortcut(QKeySequence("Ctrl+Shift+T"), self).activated.connect(
+            self._reopen_closed_tab
         )
         QShortcut(QKeySequence("Ctrl+W"), self).activated.connect(
             lambda: self._close_tab(self.tabs.currentIndex())
@@ -1454,6 +1466,7 @@ class MainWindow(QMainWindow):
         tab = Tab(self.profile, self, page=page)
         idx = self.tabs.addTab(tab, "新标签页")
         self._tab_full_titles[tab] = "新标签页"
+        self._tab_urls[tab] = "" if page is not None else url.toString()
         self._install_tab_close(tab)
         self.tabs.setCurrentIndex(idx)
         tab.title_changed.connect(lambda t: self._set_tab_title(tab, t))
@@ -1475,6 +1488,7 @@ class MainWindow(QMainWindow):
         if page is None:
             tab.load(url)
         self._relayout_tabs()
+        self._schedule_session_save()
         return tab
 
     def _on_new_page_requested(self, page: QWebEnginePage) -> None:
@@ -1486,15 +1500,74 @@ class MainWindow(QMainWindow):
         if self.tabs.count() <= 1:
             return
         w = self.tabs.widget(idx)
+        if isinstance(w, Tab):
+            # 用缓存 URL/标题（关闭时读 view 会与在途加载竞态 → AV）。
+            url = self._tab_urls.get(w, "")
+            if url:
+                self._closed_tabs.append((url, self._tab_full_titles.get(w, "")))
+                if len(self._closed_tabs) > 20:
+                    self._closed_tabs.pop(0)
         self.tabs.removeTab(idx)
         self._tab_full_titles.pop(w, None)
+        self._tab_urls.pop(w, None)
         if isinstance(w, Tab):
             self._wheel_targets.discard(w.view.focusProxy())
         w.deleteLater()
         self._relayout_tabs()
+        self._schedule_session_save()
 
     def _current(self) -> Tab:
         return self.tabs.currentWidget()  # type: ignore[return-value]
+
+    # ---------- session / recently closed ----------
+    def _schedule_session_save(self) -> None:
+        if getattr(self, "_session_timer", None) is not None:
+            self._session_timer.start()
+
+    def _save_session(self) -> None:
+        try:
+            tabs = []
+            for i in range(self.tabs.count()):
+                w = self.tabs.widget(i)
+                if isinstance(w, Tab):
+                    tabs.append({"url": self._tab_urls.get(w, ""),
+                                 "title": self._tab_full_titles.get(w, "")})
+            session.save(self.data_dir, {"tabs": tabs, "active": self.tabs.currentIndex()})
+        except Exception:
+            pass
+
+    def _restore_session(self) -> None:
+        """启动恢复：跳过 newtab；无有效标签则只开一个 newtab。"""
+        if self.settings.get("restore_session", True):
+            data = session.load(self.data_dir)
+        else:
+            data = {"tabs": []}
+        kept = []
+        for i, t in enumerate(data.get("tabs", []) or []):
+            url = (t.get("url") or "").strip()
+            if not url or url.startswith("purebrowser://newtab"):
+                continue
+            kept.append((i, url))
+        if not kept:
+            self.new_tab(NEWTAB_URL)
+            return
+        for _i, url in kept:
+            self.new_tab(QUrl(url))
+        active = data.get("active", -1)
+        target = len(kept) - 1
+        for pos, (orig, _u) in enumerate(kept):
+            if orig == active:
+                target = pos
+                break
+        idx = max(0, min(int(target), self.tabs.count() - 1))
+        self.tabs.setCurrentIndex(idx)
+
+    def _reopen_closed_tab(self) -> None:
+        while self._closed_tabs:
+            url, _title = self._closed_tabs.pop()
+            if url:
+                self.new_tab(QUrl(url))
+                return
 
     # ---------- favicons ----------
     def _globe_icon(self) -> QIcon:
@@ -1553,6 +1626,8 @@ class MainWindow(QMainWindow):
         self._apply_site_zoom(tab.view, url)
         self._ensure_wheel_filter(tab.view)
         self._apply_tab_icon(tab)
+        self._tab_urls[tab] = url.toString()
+        self._schedule_session_save()
         if tab is self.tabs.currentWidget():
             self.url_bar.setText(display_url(url))
             self.url_bar.setCursorPosition(0)
@@ -1566,6 +1641,7 @@ class MainWindow(QMainWindow):
             self._ensure_wheel_filter(tab.view)
             self.url_bar.setText(display_url(tab.current_url()))
             self._refresh_bookmark_icon()
+            self._schedule_session_save()
 
     # ---------- navigation ----------
     def _navigate(self) -> None:
@@ -1611,6 +1687,8 @@ class MainWindow(QMainWindow):
 
     # ---------- close ----------
     def closeEvent(self, event) -> None:
+        # 兜底：退出前再保存一次会话（debounce 可能还没触发）。
+        self._save_session()
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
             if isinstance(w, Tab):
