@@ -16,15 +16,15 @@ from PyQt6.QtWidgets import (
     QToolButton,
 )
 
-from purebrowser import bookmarks, history
 from purebrowser.core.interceptor import Blocker
 from purebrowser.core.locations import settings_file
 from purebrowser.core.profile import build_profile
 from purebrowser.core.settings import SEARCH_ENGINES, Settings
+from purebrowser.data import bookmarks, history
 from purebrowser.downloads import DownloadManager
 from purebrowser.newtab import NEWTAB_URL, display_url
 from purebrowser.pages import PureBrowserSchemeHandler
-from purebrowser.storage import connect
+from purebrowser.data.storage import connect
 from purebrowser.tab import Tab, to_url
 from purebrowser.urlbar import UrlBar
 

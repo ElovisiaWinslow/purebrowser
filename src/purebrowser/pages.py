@@ -9,7 +9,7 @@ from PyQt6.QtWebEngineCore import (
 )
 from PyQt6.QtWidgets import QFileDialog
 
-from purebrowser import history as history_mod
+from purebrowser.data import history as history_mod
 from purebrowser.core.locations import default_download_dir, set_data_dir
 
 NEWTAB_HTML_PATH = Path(__file__).resolve().parents[2] / "resources" / "newtab.html"
