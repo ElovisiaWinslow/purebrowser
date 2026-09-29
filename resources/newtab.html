@@ -4,25 +4,38 @@
 <meta charset="utf-8">
 <title>新标签页</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    --bg: #ECECEC;
+    --panel: #F5F5F7;
+    --text: #1D1D1F;
+    --subtext: #86868B;
+    --accent: #007AFF;
+    --border: #D2D2D7;
+    --on-accent: #FFFFFF;
+    --radius: 8px;
+    --panel-radius: 10px;
+  }
+  /* __THEME_VARS__ */
   html, body { height: 100%; margin: 0; }
   body {
     display: grid; place-items: center;
     font: 16px system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
-    background: Canvas; color: CanvasText;
+    background: var(--bg); color: var(--text);
   }
   form { display: flex; gap: 8px; width: min(640px, 80vw); }
   input {
-    flex: 1; padding: 14px 16px; border-radius: 10px;
-    border: 1px solid color-mix(in oklab, CanvasText 20%, transparent);
-    background: color-mix(in oklab, Canvas 90%, CanvasText 10%);
-    color: inherit; font-size: 16px; outline: none;
+    flex: 1; padding: 14px 16px; border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text); font-size: 16px; outline: none;
   }
-  input:focus { border-color: color-mix(in oklab, CanvasText 50%, transparent); }
+  input::placeholder { color: var(--subtext); }
+  input:focus { border-color: var(--accent); }
   button {
-    padding: 0 18px; border-radius: 10px; border: 0;
-    background: #2f6feb; color: white; font-weight: 600; cursor: pointer;
+    padding: 0 18px; border-radius: var(--radius); border: 0;
+    background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer;
   }
+  button:hover { filter: brightness(0.95); }
   h1 { font-weight: 600; letter-spacing: -0.02em; margin-bottom: 24px; }
 </style>
 </head>

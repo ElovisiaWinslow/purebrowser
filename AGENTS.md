@@ -62,7 +62,6 @@ pip install --upgrade PyQt6_sip
 | `src/purebrowser/core/privacy/flags.py` | Chromium 命令行参数逐个调过，改动会导致启动异常 |
 | `src/purebrowser/core/interceptor.py` | 拦截规则和 HTTPS 强制逻辑是隐私核心 |
 | `docs/BUILD_NOTES.md` | 历史记录文档，不可被"润色"或重构 |
-| `resources/newtab.html` | 新标签页外观，用户手工调过 |
 
 **这些文件里看似"冗余"或"不优雅"的代码，都是踩坑后的产物。** 例如：
 - `profile.py` 里的 `FAKE_UA` 是为了让 B 站识别为 Chrome
@@ -113,6 +112,8 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 - `resources/` 下的图标
 - 新增 UI 文件
 - `newtab.html` 以外的 HTML
+- `resources/newtab.html`：新标签页，允许改。
+  红线：保留 `/* __THEME_VARS__ */` 占位符，主题变量由 `pages/pages.py` 注入。
 
 ### 3.3 工具和文档
 
@@ -360,3 +361,7 @@ PureBrowser 的目标用户是：
 
 4. **`profile.py` 的 `FullScreenSupportEnabled`**：不要删除。
    不开这一项，`document.fullscreenEnabled` 返回 false，B 站等站点不渲染全屏按钮，原生全屏方案无从触发。
+
+5. **`newtab.html` 解冻**：从冻结清单移除。
+   原因：B-1.1 主题系统落地后，暗色模式下新标签页正文仍是白底，视觉不一致。
+   红线：保留 `/* __THEME_VARS__ */` 占位符；不要用 `Canvas`/`CanvasText` 系统色；所有颜色用 CSS 变量。

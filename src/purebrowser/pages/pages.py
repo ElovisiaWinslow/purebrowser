@@ -323,7 +323,7 @@ class PureBrowserSchemeHandler(QWebEngineUrlSchemeHandler):
         path = url.path()
 
         if host == "newtab":
-            self._serve_file(job, NEWTAB_HTML_PATH, b"text/html")
+            self._serve_newtab(job)
             return
 
         if host == "history":
@@ -376,6 +376,34 @@ class PureBrowserSchemeHandler(QWebEngineUrlSchemeHandler):
             return
 
         job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
+
+    def _serve_newtab(self, job) -> None:
+        """读取 newtab.html 并注入当前主题的 CSS 变量（anchor: /* __THEME_VARS__ */）。"""
+        try:
+            html = NEWTAB_HTML_PATH.read_text(encoding="utf-8")
+        except OSError:
+            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
+            return
+
+        t = self._theme
+        if t is None:
+            html = html.replace("/* __THEME_VARS__ */", "")
+        else:
+            css_vars = (
+                ":root {\n"
+                f"    --bg: {t.window};\n"
+                f"    --panel: {t.chrome};\n"
+                f"    --text: {t.text};\n"
+                f"    --subtext: {t.subtext};\n"
+                f"    --accent: {t.accent};\n"
+                f"    --border: {t.border};\n"
+                f"    --on-accent: {t.on_accent};\n"
+                f"    --radius: {t.radius}px;\n"
+                f"    --panel-radius: {t.panel}px;\n"
+                "}"
+            )
+            html = html.replace("/* __THEME_VARS__ */", css_vars)
+        self._serve_bytes(job, html.encode("utf-8"), b"text/html")
 
     def _pick_folder(self, target: str) -> None:
         if target == "data":
