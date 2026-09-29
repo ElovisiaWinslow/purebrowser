@@ -9,7 +9,16 @@ ZoomHud 目前的使用者；后续查找条可复用 FloatingHud（commit B）�
 - show_briefly(ms) 显示后定时隐藏；鼠标悬停时暂停，离开后重新计时。
 """
 from PyQt6.QtCore import QElapsedTimer, QEvent, QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QToolButton, QWidget
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
 
 def _capsule_qss(root: str) -> str:
     """深色半透明胶囊样式：ZoomHud / FindHud 共用，保证外观一致。"""
@@ -69,12 +78,39 @@ _FIND_QSS = _capsule_qss("findHud") + """
 }
 """
 
+_TOAST_QSS = _capsule_qss("downloadToast") + """
+#downloadToast #toastTitle {
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+}
+#downloadToast #toastState {
+    color: #FFFFFF;
+    font-size: 12px;
+    min-width: 44px;
+}
+#downloadToast QProgressBar {
+    background: rgba(255, 255, 255, 0.20);
+    border: 0;
+    border-radius: 3px;
+}
+#downloadToast QProgressBar::chunk {
+    background: #0A84FF;
+    border-radius: 3px;
+}
+#downloadToast #toastIcon {
+    color: #FFFFFF;
+}
+"""
+
 
 class FloatingHud(QWidget):
-    def __init__(self, parent: QWidget, anchor: str = "bottom-right", margin: int = 16):
+    def __init__(self, parent: QWidget, anchor: str = "bottom-right", margin: int = 16,
+                 bottom_offset: int = 0):
         super().__init__(parent)
         self._anchor = anchor
         self._margin = int(margin)
+        self._bottom_offset = int(bottom_offset)
         self._hovered = False
         self._autohide_enabled = False
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -121,14 +157,15 @@ class FloatingHud(QWidget):
         pw, ph = parent.width(), parent.height()
         w, h = hint.width(), hint.height()
         m = self._margin
+        off = self._bottom_offset
         if self._anchor == "top-right":
             x, y = pw - w - m, m
         elif self._anchor == "top-left":
             x, y = m, m
         elif self._anchor == "bottom-left":
-            x, y = m, ph - h - m
+            x, y = m, ph - h - m - off
         else:  # bottom-right
-            x, y = pw - w - m, ph - h - m
+            x, y = pw - w - m, ph - h - m - off
         self.move(max(0, x), max(0, y))
         self.raise_()
 
@@ -290,6 +327,65 @@ class FindHud(FloatingHud):
 
     def set_count(self, text: str) -> None:
         self.count.setText(text)
+
+
+class DownloadToast(FloatingHud):
+    """下载提示浮层：文件名 + 进度条 + 百分比/状态。点击打开下载菜单。
+
+    位于右下角、并上移 ZoomHud 高度，避免与 ZoomHud 重叠。
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent, anchor="bottom-right", margin=16, bottom_offset=56)
+        self.setObjectName("downloadToast")
+        self.setStyleSheet(_TOAST_QSS)
+        self.setFixedWidth(300)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(8)
+
+        self._icon = QLabel("\u2B07", self)
+        self._icon.setObjectName("toastIcon")
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+
+        self._title = QLabel("", self)
+        self._title.setObjectName("toastTitle")
+        col.addWidget(self._title)
+
+        self._bar = QProgressBar(self)
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(6)
+        col.addWidget(self._bar)
+
+        lay.addLayout(col, 1)
+
+        self._state = QLabel("", self)
+        self._state.setObjectName("toastState")
+        self._state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self._state)
+
+        for child in (self._icon, self._title, self._bar, self._state):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_content(self, title: str, percent: int, state: str) -> None:
+        self._title.setText(title)
+        self._title.setToolTip(title)
+        self._bar.setValue(max(0, min(100, int(percent))))
+        self._state.setText(state)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class WheelZoomFilter(QObject):

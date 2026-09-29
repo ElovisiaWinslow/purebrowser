@@ -46,7 +46,7 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
-from purebrowser.ui.hud import FindHud, WheelZoomFilter, ZoomHud
+from purebrowser.ui.hud import DownloadToast, FindHud, WheelZoomFilter, ZoomHud
 from purebrowser.ui.menu_rows import MenuRow
 from purebrowser.ui.tab_area import TabArea
 from purebrowser.ui.tab import Tab, to_url
@@ -293,6 +293,7 @@ class MainWindow(QMainWindow):
         self._build_statusbar()
         self._build_zoom_hud()
         self._build_find_hud()
+        self._build_download_toast()
         self._build_tab_plus()
         self._install_shortcuts()
 
@@ -454,6 +455,12 @@ class MainWindow(QMainWindow):
         # 但 focusProxy 在 view 首次显示后才存在且可能被替换，故按需安装。
         self._wheel_filter = WheelZoomFilter(self._zoom_step)
         self._wheel_targets: set = set()
+
+    def _build_download_toast(self) -> None:
+        # 右下角浮层，上移 56px 让开同位的 ZoomHud。
+        self.download_toast = DownloadToast(self.tabs.stack())
+        self.download_toast.clicked.connect(self._open_download_menu_from_toast)
+        self.downloads.changed.connect(self._on_downloads_changed)
 
     def _ensure_wheel_filter(self, view) -> None:
         fp = view.focusProxy()
@@ -1390,6 +1397,44 @@ class MainWindow(QMainWindow):
             buttons.append({"id": "folder", "icon": icons.icon("folder", color, 16), "tooltip": "打开所在目录"})
         buttons.append({"id": "remove", "icon": icons.icon("cancel", color, 16), "tooltip": "从列表移除"})
         return buttons
+
+    @staticmethod
+    def _percent(rec: dict) -> int:
+        total = rec.get("total") or 0
+        received = rec.get("received") or 0
+        if total > 0:
+            return int(received * 100 / total)
+        return 0
+
+    def _on_downloads_changed(self) -> None:
+        active = [r for r in self.downloads.records if not r["finished"]]
+        if active:
+            newest = max(active, key=lambda r: r.get("created_at", 0))
+            if len(active) == 1:
+                title = newest["filename"]
+            else:
+                title = f"{len(active)} 个下载中 · 最新：{newest['filename']}"
+            self.download_toast.set_content(title, self._percent(newest), f"{self._percent(newest)}%")
+            self.download_toast.show_briefly(3000)
+        elif self.downloads.records:
+            rec = max(self.downloads.records, key=lambda r: r.get("created_at", 0))
+            state_text = rec.get("state_text", "")
+            if rec["canceled"]:
+                label = {"interrupted": "已中断", "cancelled": "已取消"}.get(state_text, "失败")
+            else:
+                label = "已完成"
+            percent = 100 if not rec["canceled"] else self._percent(rec)
+            self.download_toast.set_content(rec["filename"], percent, label)
+            self.download_toast.show_briefly(1500)
+        else:
+            self.download_toast.hide()
+
+    def _open_download_menu_from_toast(self) -> None:
+        # 在 toast 上方弹出下载菜单（不依赖工具栏按钮，避免 popup 被 release 关闭）。
+        top_left = self.download_toast.mapToGlobal(QPoint(0, 0))
+        self.download_toast.hide()
+        hint = self.download_menu.sizeHint()
+        self.download_menu.popup(QPoint(top_left.x(), max(0, top_left.y() - hint.height())))
 
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()
