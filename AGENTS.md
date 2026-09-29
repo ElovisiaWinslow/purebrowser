@@ -346,3 +346,17 @@ PureBrowser 的目标用户是：
 2. **`tab.py` 的全屏支持**：新增 `PurePage._handle_fullscreen`，接受全屏请求。
    原因：修复 B 站视频只有"网页全屏"没有真全屏。
    红线：**不要删除 `fullScreenRequested.connect(...)` 这一行。**
+
+3. **`window.py` 的全屏实现**：Windows 平台使用原生 Win32 API（`SetWindowLongPtrW` + `SetWindowPlacement` + `SetWindowPos`）实现全屏，**不要改回 Qt 的 `showFullScreen()` / `showNormal()` / `showMaximized()` / `setWindowState()`**。
+
+   原因：Qt 在 Windows 上把「全屏 → 最大化」拆成两段，产生 31~78ms 的窗口化中间态。9 个 Qt 层方案均无效。只有完全绕过 Qt、用 `SetWindowPlacement` 原子恢复才能消除。
+
+   红线：
+   - 不要删除 `_native_enter_fullscreen` / `_native_exit_fullscreen`
+   - 不要改回 Qt 的窗口状态 API
+   - 用 `self._is_fullscreen` 替代 `isFullScreen()`（Qt 不知道我们改了窗口状态）
+   - `PUREBROWSER_FS_DEBUG=1` 探针保留，用于诊断
+   - 保留 Qt 层的非 Windows fallback 分支
+
+4. **`profile.py` 的 `FullScreenSupportEnabled`**：不要删除。
+   不开这一项，`document.fullscreenEnabled` 返回 false，B 站等站点不渲染全屏按钮，原生全屏方案无从触发。
