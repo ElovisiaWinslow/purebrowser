@@ -1,4 +1,9 @@
-PyQt6>=6.6
-PyQt6-WebEngine>=6.6
+# Pure Python dependencies. Running pip install -r requirements.txt will not touch Qt.
 httpx>=0.27
 platformdirs>=4.2
+
+# The following dependencies must use self-compiled versions and are not installed via pip:
+#   PyQt6==6.7.1           (self-compiled wheel)
+#   PyQt6_sip==13.8.0
+#   PyQt6-WebEngine==6.7.0 (self-compiled wheel)
+# See README.md for installation instructions.

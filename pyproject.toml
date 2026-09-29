@@ -2,9 +2,10 @@
 name = "purebrowser"
 version = "0.0.1"
 requires-python = ">=3.10"
+# 注意：PyQt6 和 PyQt6-WebEngine 不在此处声明。
+# 它们必须使用自编译的 wheel（含 H.264），从 Releases 下载后手工安装。
+# 详见 README.md 的"开发者：克隆即跑"和 AGENTS.md 第二节。
 dependencies = [
-    "PyQt6>=6.6",
-    "PyQt6-WebEngine>=6.6",
     "httpx>=0.27",
     "platformdirs>=4.2",
 ]
@@ -15,6 +16,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+purebrowser = ["../../resources/*"]
 
 [tool.ruff]
 line-length = 100
