@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
         self._apply_shadow(self.download_menu)
 
         # 富行菜单：hover 由 QMenu.hovered 驱动（QWidgetAction 行背景不透明）。
-        self._menu_row_maps = {}
+        # 行映射挂在各菜单对象上（menu._row_map），子菜单销毁即释放，避免泄漏。
         for _m in (self.history_menu, self.bookmarks_menu, self.download_menu):
             _m.hovered.connect(lambda a, m=_m: self._on_menu_hovered(m, a))
 
@@ -1058,7 +1058,7 @@ class MainWindow(QMainWindow):
 
     # ---------- menus ----------
     def _on_menu_hovered(self, menu, action) -> None:
-        rows = self._menu_row_maps.get(menu, {})
+        rows = getattr(menu, "_row_map", {})
         for row in rows.values():
             row.set_highlight(False)
         row = rows.get(action)
@@ -1067,7 +1067,7 @@ class MainWindow(QMainWindow):
 
     def _submenu(self, parent_menu, label):
         sub = parent_menu.addMenu(label)
-        self._menu_row_maps[sub] = {}
+        sub._row_map = {}
         sub.hovered.connect(lambda a, m=sub: self._on_menu_hovered(m, a))
         self._apply_shadow(sub)
         return sub
@@ -1114,7 +1114,7 @@ class MainWindow(QMainWindow):
     def _populate_history_menu(self) -> None:
         self.history_menu.clear()
         rows_map: dict = {}
-        self._menu_row_maps[self.history_menu] = rows_map
+        self.history_menu._row_map = rows_map
         rows = history.recent(self.conn, limit=150)
         if not rows:
             a = self.history_menu.addAction("暂无历史记录")
@@ -1136,7 +1136,7 @@ class MainWindow(QMainWindow):
                 if not items:
                     continue
                 sub = self._submenu(self.history_menu, label)
-                sub_map = self._menu_row_maps[sub]
+                sub_map = sub._row_map
                 for r in items[:cap]:
                     url = r["url"]
                     host = r["host"] or (urlparse(url).hostname or "")
@@ -1155,7 +1155,7 @@ class MainWindow(QMainWindow):
     def _populate_bookmarks_menu(self) -> None:
         self.bookmarks_menu.clear()
         rows_map: dict = {}
-        self._menu_row_maps[self.bookmarks_menu] = rows_map
+        self.bookmarks_menu._row_map = rows_map
         rows = bookmarks.list_all(self.conn)
         if not rows:
             a = self.bookmarks_menu.addAction("暂无书签")
@@ -1179,7 +1179,7 @@ class MainWindow(QMainWindow):
     def _populate_download_menu(self) -> None:
         self.download_menu.clear()
         rows_map: dict = {}
-        self._menu_row_maps[self.download_menu] = rows_map
+        self.download_menu._row_map = rows_map
         open_folder = self.download_menu.addAction("打开下载文件夹")
         open_folder.triggered.connect(self.downloads.open_folder)
         if not self.downloads.has_any():
@@ -1204,7 +1204,7 @@ class MainWindow(QMainWindow):
             if not items:
                 continue
             sub = self._submenu(self.download_menu, label)
-            sub_map = self._menu_row_maps[sub]
+            sub_map = sub._row_map
             for rec in items:
                 self._add_menu_row(
                     sub,
