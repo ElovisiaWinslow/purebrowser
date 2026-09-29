@@ -4,7 +4,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
 
-from purebrowser.locations import default_download_dir
+from purebrowser.core.locations import default_download_dir
 
 
 class DownloadManager(QObject):

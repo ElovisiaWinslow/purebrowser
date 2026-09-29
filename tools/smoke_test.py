@@ -30,7 +30,8 @@ def check_webengine_import():
 
 def check_purebrowser_import():
     import purebrowser
-    from purebrowser import window, tab, urlbar, profile, interceptor  # noqa
+    from purebrowser import window, tab, urlbar  # noqa
+    from purebrowser.core import profile, interceptor  # noqa
 
 
 def check_no_qt6_official():
@@ -47,7 +48,7 @@ def check_no_qt6_official():
 
 
 def check_data_dir():
-    from purebrowser.locations import get_data_dir
+    from purebrowser.core.locations import get_data_dir
     d = get_data_dir()
     assert d.exists(), f"数据目录不存在: {d}"
 

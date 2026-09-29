@@ -2,7 +2,7 @@
 
 
 def main() -> int:
-    from purebrowser.privacy import flags
+    from purebrowser.core.privacy import flags
     flags.apply()
 
     from purebrowser.app import run

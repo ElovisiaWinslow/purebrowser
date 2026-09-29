@@ -17,7 +17,7 @@ def run(argv: list[str] | None = None) -> int:
 
     from PyQt6.QtWidgets import QApplication
 
-    from purebrowser.locations import get_data_dir
+    from purebrowser.core.locations import get_data_dir
     from purebrowser.window import MainWindow
 
     app = QApplication(argv)
