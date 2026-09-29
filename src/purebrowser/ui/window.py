@@ -4,8 +4,8 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QSize, Qt, QUrl
-from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QShortcut
+from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
+from PyQt6.QtGui import QColor, QFontMetrics, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -173,6 +173,12 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._sync_from_tab)
         self.setCentralWidget(self.tabs)
 
+        # 标签栏右侧被 mask 裁掉的区域会露出 QTabWidget 底色，铺成 chrome 避免接缝。
+        pal = self.tabs.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor(self.theme.chrome))
+        self.tabs.setPalette(pal)
+        self.tabs.setAutoFillBackground(True)
+
         self._build_toolbar()
         self._build_statusbar()
         self._build_tab_plus()
@@ -180,7 +186,7 @@ class MainWindow(QMainWindow):
 
         self.new_tab(NEWTAB_URL)
 
-        self._sync_tab_visibility()
+        self._relayout_tabs()
 
     # ---------- UI ----------
     def _build_toolbar(self) -> None:
@@ -270,9 +276,10 @@ class MainWindow(QMainWindow):
         self.tab_plus.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_plus.clicked.connect(lambda: self.new_tab(NEWTAB_URL))
         bar = self.tabs.tabBar()
-        bar.tabMoved.connect(self._position_tab_plus)
-        bar.currentChanged.connect(self._position_tab_plus)
-        self._position_tab_plus()
+        bar.tabMoved.connect(self._relayout_tabs)
+        bar.currentChanged.connect(self._relayout_tabs)
+        bar.set_relayout_callback(self._relayout_tabs)
+        self._relayout_tabs()
 
     def _install_tab_close(self, tab: Tab) -> None:
         """给单个标签装自定义关闭按钮（细线 SVG，hover 高亮）。"""
@@ -325,6 +332,28 @@ class MainWindow(QMainWindow):
         y = bar_pos.y() + (bar.height() - self.tab_plus.height()) // 2
         self.tab_plus.move(x, y)
         self.tab_plus.raise_()
+
+    def _relayout_tabs(self, *_args) -> None:
+        """统一入口：立即重排一次，并在下一轮事件循环再算一次（兜住布局滞后一帧）。"""
+        self._relayout_immediate()
+        if not getattr(self, "_relayout_pending", False):
+            self._relayout_pending = True
+            QTimer.singleShot(0, self._relayout_deferred)
+
+    def _relayout_immediate(self) -> None:
+        if getattr(self, "_relayout_guard", False):
+            return
+        self._relayout_guard = True
+        try:
+            self._sync_tab_visibility()
+            self._elide_tab_titles()
+            self._position_tab_plus()
+        finally:
+            self._relayout_guard = False
+
+    def _relayout_deferred(self) -> None:
+        self._relayout_pending = False
+        self._relayout_immediate()
 
     def _install_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(
@@ -402,9 +431,7 @@ class MainWindow(QMainWindow):
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
         self.tabs.tabBar().update()
-        self._sync_tab_visibility()
-        self._elide_tab_titles()
-        self._position_tab_plus()
+        self._relayout_tabs()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def _hide_chrome(self) -> None:
@@ -658,8 +685,7 @@ class MainWindow(QMainWindow):
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         if page is None:
             tab.load(url)
-        self._sync_tab_visibility()
-        self._position_tab_plus()
+        self._relayout_tabs()
         return tab
 
     def _on_new_page_requested(self, page: QWebEnginePage) -> None:
@@ -674,8 +700,7 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(idx)
         self._tab_full_titles.pop(w, None)
         w.deleteLater()
-        self._sync_tab_visibility()
-        self._position_tab_plus()
+        self._relayout_tabs()
 
     def _current(self) -> Tab:
         return self.tabs.currentWidget()  # type: ignore[return-value]
