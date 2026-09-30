@@ -1121,7 +1121,7 @@ class MainWindow(QMainWindow):
         return self._globe_icon()
 
     def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, url=None,
-                      kind=None, key=None, buttons=None, path=None, rec=None):
+                      kind=None, key=None, buttons=None, path=None, rec=None, retry_url=None):
         row = MenuRow(
             self.theme,
             title,
@@ -1134,7 +1134,8 @@ class MainWindow(QMainWindow):
         action = QWidgetAction(menu)
         action.setDefaultWidget(row)
         menu.addAction(action)
-        row._meta = {"kind": kind, "key": key, "url": url, "path": path, "rec": rec}
+        row._meta = {"kind": kind, "key": key, "url": url, "path": path,
+                     "rec": rec, "retry_url": retry_url}
         row._action = action
         row._menu = menu
         if url is not None:
@@ -1157,6 +1158,16 @@ class MainWindow(QMainWindow):
             self.new_tab(QUrl(url))
         else:
             self._open_in_current_tab(url)
+
+    def _retry_download(self, url) -> None:
+        """用下载 URL 重新发起下载（经共享 profile；新 rec + 新 DB 行，旧行保留）。"""
+        if not url:
+            return
+        tab = self._current()
+        page = tab.view.page() if isinstance(tab, Tab) else None
+        if page is None:
+            return
+        page.download(QUrl(url))
 
     def _remove_menu_row(self, menu, action) -> None:
         if menu is None or action is None:
@@ -1190,6 +1201,9 @@ class MainWindow(QMainWindow):
             self._remove_menu_row(menu, action)
             return
         path = meta.get("path") or ""
+        if action_id == "refresh":
+            self._retry_download(meta.get("retry_url"))
+            return
         if action_id == "open":
             self.downloads.open_file(path)
             return
@@ -1461,7 +1475,7 @@ class MainWindow(QMainWindow):
                         icon=icons.icon(icon_name, self.theme.subtext, 20),
                         kind="download", key=rec.get("db_id"),
                         buttons=self._download_buttons(rec),
-                        path=rec["path"], rec=rec,
+                        path=rec["path"], rec=rec, retry_url=rec.get("url"),
                     )
                 else:
                     self._add_menu_row(
@@ -1471,16 +1485,21 @@ class MainWindow(QMainWindow):
                         icon=icons.icon(icon_name, self.theme.subtext, 20),
                         kind="download", key=h["id"],
                         buttons=self._history_buttons(h),
-                        path=h["path"], rec=None,
+                        path=h["path"], rec=None, retry_url=h["url"],
                     )
 
     def _download_buttons(self, rec: dict) -> list:
         color = self.theme.subtext
         if rec["canceled"]:
-            return [
-                {"id": "folder", "icon": icons.icon("folder", color, 16), "tooltip": "打开所在目录"},
-                {"id": "remove", "icon": icons.icon("cancel", color, 16), "tooltip": "从列表移除"},
-            ]
+            buttons = []
+            if rec.get("url"):
+                buttons.append({"id": "refresh", "icon": icons.icon("refresh", color, 16),
+                                "tooltip": "重试下载"})
+            buttons.append({"id": "folder", "icon": icons.icon("folder", color, 16),
+                            "tooltip": "打开所在目录"})
+            buttons.append({"id": "remove", "icon": icons.icon("cancel", color, 16),
+                            "tooltip": "从列表移除"})
+            return buttons
         if rec["finished"]:
             return [
                 {"id": "open", "icon": icons.icon("open", color, 16), "tooltip": "打开文件"},
@@ -1513,6 +1532,9 @@ class MainWindow(QMainWindow):
         color = self.theme.subtext
         exists = bool(row["path"]) and Path(row["path"]).exists()
         buttons = []
+        if row["state"] in ("cancelled", "interrupted") and row["url"]:
+            buttons.append({"id": "refresh", "icon": icons.icon("refresh", color, 16),
+                            "tooltip": "重试下载"})
         if row["state"] == "completed" and exists:
             buttons.append({"id": "open", "icon": icons.icon("open", color, 16), "tooltip": "打开文件"})
         if exists:
