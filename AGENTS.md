@@ -89,6 +89,20 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 
 ---
 
+## 二点五、文件系统操作红线（最高优先级）
+
+> 起因：曾用 `Get-ChildItem -LiteralPath <dir> -Include *.download`（无 `-Recurse`/通配符，`-Include` 被忽略）配合
+> `Remove-Item -Force`，误删用户 `Downloads` 下的全部文件且无法从回收站恢复。以下为强制规则。
+
+1. **禁止对任何用户目录**（`Downloads` / `Documents` / `Desktop` / 用户主目录）**执行批量删除**。
+2. 清理操作**只允许针对自己创建的文件**，且必须放在 `D:\T\opencode\` 下。
+3. `Get-ChildItem -Include` **必须**配合 `-Recurse` 或路径通配符；优先用 `-Filter`。
+4. 任何 `Remove-Item` 前必须：先 `-WhatIf`，或先输出将被删除的文件列表让用户确认。
+5. **禁止**用 `Remove-Item -Force`（跳过回收站）删除用户可见的文件。
+6. 清理测试产物时，**只删 `D:\T\opencode\` 下的文件**。
+
+---
+
 ## 三、允许改动的范围
 
 以下文件可以自由修改、优化、重构：
