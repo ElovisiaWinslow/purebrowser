@@ -208,14 +208,24 @@ class _TitleButton(QToolButton):
         self._hover_icon = hover
         self.setIcon(normal)
 
+    def set_hovered(self, on: bool) -> None:
+        """hover 只由 `hovered` 动态属性驱动（QSS 不再用 :hover），避免与
+        HTMAXBUTTON 非客户区 hover 两套状态打架。"""
+        if bool(self.property("hovered")) != bool(on):
+            self.setProperty("hovered", bool(on))
+            self.style().unpolish(self)
+            self.style().polish(self)
+
     def enterEvent(self, event) -> None:
         if self._hover_icon is not None:
             self.setIcon(self._hover_icon)
+        self.set_hovered(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         if self._normal_icon is not None:
             self.setIcon(self._normal_icon)
+        self.set_hovered(False)
         super().leaveEvent(event)
 
 
@@ -861,11 +871,14 @@ class MainWindow(QMainWindow):
                     self._toggle_maximize()
                     return True, 0
                 if msg.message == WM_NCMOUSEMOVE:
-                    # 最大化键走非客户区（HTMAXBUTTON），Qt 收不到 hover，这里手动驱动。
-                    self._set_caption_hover(self._caption_button_at(msg))
+                    # 最大化键走非客户区（HTMAXBUTTON），Qt 收不到 enter/leave。
+                    target = self._caption_button_at(msg)
+                    self._dispatch_caption_leave(target)
+                    self._set_caption_hover(target)
                     self._track_nc_mouse_leave()
                     return False, 0
                 if msg.message == WM_NCMOUSELEAVE:
+                    self._dispatch_caption_leave(None)
                     self._set_caption_hover(None)
                     return False, 0
         except Exception:
@@ -894,6 +907,18 @@ class MainWindow(QMainWindow):
             if QRect(tl, btn.size()).contains(local):
                 return btn
         return None
+
+    def _dispatch_caption_leave(self, keep) -> None:
+        """给非当前按钮派发 Leave，让 Qt 内部 hover / tooltip 状态一并清除。"""
+        for btn in (
+            getattr(self, "win_min", None),
+            getattr(self, "win_max", None),
+            getattr(self, "win_close", None),
+        ):
+            if btn is None or btn is keep:
+                continue
+            if bool(btn.property("hovered")):
+                QApplication.sendEvent(btn, QEvent(QEvent.Type.Leave))
 
     def _set_caption_hover(self, target) -> None:
         """仅对 HTMAXBUTTON 非客户区按钮需要（客户区按钮走 QSS :hover）。"""

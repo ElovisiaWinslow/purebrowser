@@ -141,10 +141,8 @@ QToolButton#tabClose:pressed { background: $border; }
 QToolButton#winBtn, QToolButton#winClose {
     background: transparent; border: 0; border-radius: 6px;
 }
-QToolButton#winBtn:hover,
 QToolButton#winBtn[hovered="true"] { background: $hover; }
 QToolButton#winBtn:pressed { background: $border; }
-QToolButton#winClose:hover,
 QToolButton#winClose[hovered="true"] { background: #E81123; }
 
 QToolButton#tabPlus {
