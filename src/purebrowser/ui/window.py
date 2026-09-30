@@ -10,6 +10,7 @@ from urllib.parse import quote_plus, urlparse
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QFontMetrics,
     QIcon,
     QKeySequence,
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
     QTabBar,
     QToolBar,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -93,8 +95,6 @@ if IS_WINDOWS:
     WM_ENTERSIZEMOVE = 0x0231
     WM_EXITSIZEMOVE = 0x0232
     WM_NCLBUTTONDOWN = 0x00A1
-    WM_NCMOUSEMOVE = 0x00A0
-    WM_NCMOUSELEAVE = 0x02A3
 
     HTCLIENT = 1
     HTCAPTION = 2
@@ -111,17 +111,6 @@ if IS_WINDOWS:
     SW_MAXIMIZE = 3
     SW_MINIMIZE = 6
     SW_RESTORE = 9
-
-    TME_LEAVE = 0x00000002
-    TME_NONCLIENT = 0x00000010
-
-    class _TRACKMOUSEEVENT(ctypes.Structure):
-        _fields_ = [
-            ("cbSize", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("hwndTrack", wintypes.HWND),
-            ("dwHoverTime", wintypes.DWORD),
-        ]
 
     class _WINDOWPLACEMENT(ctypes.Structure):
         _fields_ = [
@@ -185,9 +174,6 @@ if IS_WINDOWS:
     _user32.ShowWindow.restype = wintypes.BOOL
     _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 
-    _user32.TrackMouseEvent.restype = wintypes.BOOL
-    _user32.TrackMouseEvent.argtypes = [ctypes.POINTER(_TRACKMOUSEEVENT)]
-
     _user32.IsZoomed.restype = wintypes.BOOL
     _user32.IsZoomed.argtypes = [wintypes.HWND]
 
@@ -218,24 +204,15 @@ class _TitleButton(QToolButton):
         self.setIcon(normal)
 
     def set_hovered(self, on: bool) -> None:
-        """hover 只由 `hovered` 动态属性驱动（QSS 不再用 :hover），避免与
-        HTMAXBUTTON 非客户区 hover 两套状态打架。"""
+        """hover 由 `hovered` 动态属性驱动（QSS 不用 :hover），由轮询统一设置。"""
         if bool(self.property("hovered")) != bool(on):
             self.setProperty("hovered", bool(on))
             self.style().unpolish(self)
             self.style().polish(self)
-
-    def enterEvent(self, event) -> None:
-        if self._hover_icon is not None:
+        if on and self._hover_icon is not None:
             self.setIcon(self._hover_icon)
-        self.set_hovered(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        if self._normal_icon is not None:
+        elif not on and self._normal_icon is not None:
             self.setIcon(self._normal_icon)
-        self.set_hovered(False)
-        super().leaveEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -337,6 +314,14 @@ class MainWindow(QMainWindow):
         self._build_find_hud()
         self._build_download_toast()
         self._build_tab_plus()
+
+        # 三键 hover：轮询光标统一驱动（非客户区 max 收不到 Qt enter/leave）。
+        self._hover_btn = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setInterval(60)
+        self._hover_timer.timeout.connect(self._poll_caption_hover)
+        self._hover_timer.start()
+
         self._install_shortcuts()
 
         # 最近关闭标签栈（内存，仅记用户主动关闭的标签）与会话 debounce 定时器。
@@ -881,17 +866,6 @@ class MainWindow(QMainWindow):
                     # Win11：命中最大化键（Snap 弹层用的 HTMAXBUTTON）时点击处理。
                     self._toggle_maximize()
                     return True, 0
-                if msg.message == WM_NCMOUSEMOVE:
-                    # 最大化键走非客户区（HTMAXBUTTON），Qt 收不到 enter/leave。
-                    target = self._caption_button_at(msg)
-                    self._dispatch_caption_leave(target)
-                    self._set_caption_hover(target)
-                    self._track_nc_mouse_leave()
-                    return False, 0
-                if msg.message == WM_NCMOUSELEAVE:
-                    self._dispatch_caption_leave(None)
-                    self._set_caption_hover(None)
-                    return False, 0
         except Exception:
             pass
         return False, 0
@@ -917,17 +891,11 @@ class MainWindow(QMainWindow):
         params.rgrc[0].right = work.right
         params.rgrc[0].bottom = work.bottom
 
-    def _caption_button_at(self, msg):
-        """非客户鼠标消息的屏幕坐标 → 命中的标题按钮（无则 None）。"""
-        if not IS_WINDOWS:
-            return None
-        gx = ctypes.c_short(msg.lParam & 0xFFFF).value
-        gy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
-        wh = self.windowHandle()
-        dpr = wh.devicePixelRatio() if wh is not None else 1.0
-        if dpr <= 0:
-            dpr = 1.0
-        local = self.mapFromGlobal(QPoint(int(round(gx / dpr)), int(round(gy / dpr))))
+    def _poll_caption_hover(self) -> None:
+        """轮询光标统一驱动三键 hover（不依赖 Qt enter/leave，规避 HTMAXBUTTON
+        非客户区导致的残留 hover/tooltip）。"""
+        pos = self.mapFromGlobal(QCursor.pos())
+        target = None
         for btn in (
             getattr(self, "win_min", None),
             getattr(self, "win_max", None),
@@ -936,46 +904,17 @@ class MainWindow(QMainWindow):
             if btn is None or not btn.isVisible():
                 continue
             tl = btn.mapTo(self, QPoint(0, 0))
-            if QRect(tl, btn.size()).contains(local):
-                return btn
-        return None
-
-    def _dispatch_caption_leave(self, keep) -> None:
-        """给非当前按钮派发 Leave，让 Qt 内部 hover / tooltip 状态一并清除。"""
-        for btn in (
-            getattr(self, "win_min", None),
-            getattr(self, "win_max", None),
-            getattr(self, "win_close", None),
-        ):
-            if btn is None or btn is keep:
-                continue
-            if bool(btn.property("hovered")):
-                QApplication.sendEvent(btn, QEvent(QEvent.Type.Leave))
-
-    def _set_caption_hover(self, target) -> None:
-        """仅对 HTMAXBUTTON 非客户区按钮需要（客户区按钮走 QSS :hover）。"""
-        for btn in (
-            getattr(self, "win_min", None),
-            getattr(self, "win_max", None),
-            getattr(self, "win_close", None),
-        ):
-            if btn is None:
-                continue
-            want = btn is target
-            if bool(btn.property("hovered")) != want:
-                btn.setProperty("hovered", want)
-                btn.style().unpolish(btn)
-                btn.style().polish(btn)
-
-    def _track_nc_mouse_leave(self) -> None:
-        if not IS_WINDOWS:
+            if QRect(tl, btn.size()).contains(pos):
+                target = btn
+                break
+        if target is self._hover_btn:
             return
-        tme = _TRACKMOUSEEVENT()
-        tme.cbSize = ctypes.sizeof(_TRACKMOUSEEVENT)
-        tme.dwFlags = TME_LEAVE | TME_NONCLIENT
-        tme.hwndTrack = self._hwnd()
-        tme.dwHoverTime = 0
-        _user32.TrackMouseEvent(ctypes.byref(tme))
+        if self._hover_btn is not None:
+            self._hover_btn.set_hovered(False)
+        if target is not None:
+            target.set_hovered(True)
+        self._hover_btn = target
+        QToolTip.hideText()
 
     def _freeze_begin(self) -> None:
         """用户开始拖动/调整窗口：抓当前 WebEngine 画面，用 overlay 拉伸显示。"""
