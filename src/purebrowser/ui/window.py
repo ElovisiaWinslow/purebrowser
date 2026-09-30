@@ -93,6 +93,8 @@ if IS_WINDOWS:
     WM_ENTERSIZEMOVE = 0x0231
     WM_EXITSIZEMOVE = 0x0232
     WM_NCLBUTTONDOWN = 0x00A1
+    WM_NCMOUSEMOVE = 0x00A0
+    WM_NCMOUSELEAVE = 0x02A3
 
     HTCLIENT = 1
     HTCAPTION = 2
@@ -109,6 +111,17 @@ if IS_WINDOWS:
     SW_MAXIMIZE = 3
     SW_MINIMIZE = 6
     SW_RESTORE = 9
+
+    TME_LEAVE = 0x00000002
+    TME_NONCLIENT = 0x00000010
+
+    class _TRACKMOUSEEVENT(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("hwndTrack", wintypes.HWND),
+            ("dwHoverTime", wintypes.DWORD),
+        ]
 
     class _WINDOWPLACEMENT(ctypes.Structure):
         _fields_ = [
@@ -165,6 +178,9 @@ if IS_WINDOWS:
     ]
     _user32.ShowWindow.restype = wintypes.BOOL
     _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+
+    _user32.TrackMouseEvent.restype = wintypes.BOOL
+    _user32.TrackMouseEvent.argtypes = [ctypes.POINTER(_TRACKMOUSEEVENT)]
 
 
 def _fmt_ptr(value) -> str:
@@ -844,9 +860,65 @@ class MainWindow(QMainWindow):
                     # Win11：命中最大化键（Snap 弹层用的 HTMAXBUTTON）时点击处理。
                     self._toggle_maximize()
                     return True, 0
+                if msg.message == WM_NCMOUSEMOVE:
+                    # 最大化键走非客户区（HTMAXBUTTON），Qt 收不到 hover，这里手动驱动。
+                    self._set_caption_hover(self._caption_button_at(msg))
+                    self._track_nc_mouse_leave()
+                    return False, 0
+                if msg.message == WM_NCMOUSELEAVE:
+                    self._set_caption_hover(None)
+                    return False, 0
         except Exception:
             pass
         return False, 0
+
+    def _caption_button_at(self, msg):
+        """非客户鼠标消息的屏幕坐标 → 命中的标题按钮（无则 None）。"""
+        if not IS_WINDOWS:
+            return None
+        gx = ctypes.c_short(msg.lParam & 0xFFFF).value
+        gy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+        wh = self.windowHandle()
+        dpr = wh.devicePixelRatio() if wh is not None else 1.0
+        if dpr <= 0:
+            dpr = 1.0
+        local = self.mapFromGlobal(QPoint(int(round(gx / dpr)), int(round(gy / dpr))))
+        for btn in (
+            getattr(self, "win_min", None),
+            getattr(self, "win_max", None),
+            getattr(self, "win_close", None),
+        ):
+            if btn is None or not btn.isVisible():
+                continue
+            tl = btn.mapTo(self, QPoint(0, 0))
+            if QRect(tl, btn.size()).contains(local):
+                return btn
+        return None
+
+    def _set_caption_hover(self, target) -> None:
+        """仅对 HTMAXBUTTON 非客户区按钮需要（客户区按钮走 QSS :hover）。"""
+        for btn in (
+            getattr(self, "win_min", None),
+            getattr(self, "win_max", None),
+            getattr(self, "win_close", None),
+        ):
+            if btn is None:
+                continue
+            want = btn is target
+            if bool(btn.property("hovered")) != want:
+                btn.setProperty("hovered", want)
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+
+    def _track_nc_mouse_leave(self) -> None:
+        if not IS_WINDOWS:
+            return
+        tme = _TRACKMOUSEEVENT()
+        tme.cbSize = ctypes.sizeof(_TRACKMOUSEEVENT)
+        tme.dwFlags = TME_LEAVE | TME_NONCLIENT
+        tme.hwndTrack = self._hwnd()
+        tme.dwHoverTime = 0
+        _user32.TrackMouseEvent(ctypes.byref(tme))
 
     def _freeze_begin(self) -> None:
         """用户开始拖动/调整窗口：抓当前 WebEngine 画面，用 overlay 拉伸显示。"""

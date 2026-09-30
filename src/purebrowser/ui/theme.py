@@ -139,11 +139,13 @@ QToolButton#tabClose:pressed { background: $border; }
 
 /* 窗口控制按钮（标题条右侧） */
 QToolButton#winBtn, QToolButton#winClose {
-    background: transparent; border: 0; border-radius: 0;
+    background: transparent; border: 0; border-radius: 6px;
 }
-QToolButton#winBtn:hover { background: $hover; }
+QToolButton#winBtn:hover,
+QToolButton#winBtn[hovered="true"] { background: $hover; }
 QToolButton#winBtn:pressed { background: $border; }
-QToolButton#winClose:hover { background: #E81123; }
+QToolButton#winClose:hover,
+QToolButton#winClose[hovered="true"] { background: #E81123; }
 
 QToolButton#tabPlus {
     background: transparent; border: 0; border-radius: 6px;
