@@ -9,6 +9,7 @@ ZoomHud 目前的使用者；后续查找条可复用 FloatingHud（commit B）�
 - show_briefly(ms) 显示后定时隐藏；鼠标悬停时暂停，离开后重新计时。
 """
 from PyQt6.QtCore import QElapsedTimer, QEvent, QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -87,16 +88,17 @@ _TOAST_QSS = _capsule_qss("downloadToast") + """
 #downloadToast #toastState {
     color: #FFFFFF;
     font-size: 12px;
-    min-width: 44px;
+    min-width: 48px;
+    max-width: 48px;
 }
 #downloadToast QProgressBar {
     background: rgba(255, 255, 255, 0.20);
     border: 0;
-    border-radius: 3px;
+    border-radius: 4px;
 }
 #downloadToast QProgressBar::chunk {
     background: #0A84FF;
-    border-radius: 3px;
+    border-radius: 4px;
 }
 #downloadToast #toastIcon {
     color: #FFFFFF;
@@ -341,7 +343,7 @@ class DownloadToast(FloatingHud):
         super().__init__(parent, anchor="bottom-right", margin=16, bottom_offset=56)
         self.setObjectName("downloadToast")
         self.setStyleSheet(_TOAST_QSS)
-        self.setFixedWidth(300)
+        self.setFixedWidth(320)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 6)
@@ -349,6 +351,8 @@ class DownloadToast(FloatingHud):
 
         self._icon = QLabel("\u2B07", self)
         self._icon.setObjectName("toastIcon")
+        self._icon.setFixedWidth(20)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         col = QVBoxLayout()
@@ -363,13 +367,15 @@ class DownloadToast(FloatingHud):
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(6)
+        self._bar.setFixedHeight(8)
+        self._bar.setMinimumWidth(0)
         col.addWidget(self._bar)
 
         lay.addLayout(col, 1)
 
         self._state = QLabel("", self)
         self._state.setObjectName("toastState")
+        self._state.setFixedWidth(48)
         self._state.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(self._state)
 
@@ -377,7 +383,12 @@ class DownloadToast(FloatingHud):
             child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def set_content(self, title: str, percent: int, state: str) -> None:
-        self._title.setText(title)
+        margins = self.layout().contentsMargins()
+        avail = (self.width() - margins.left() - margins.right()
+                 - self._icon.width() - self._state.width()
+                 - self.layout().spacing() * 2)
+        fm = QFontMetrics(self._title.font())
+        self._title.setText(fm.elidedText(title, Qt.TextElideMode.ElideRight, max(40, avail)))
         self._title.setToolTip(title)
         self._bar.setValue(max(0, min(100, int(percent))))
         self._state.setText(state)
