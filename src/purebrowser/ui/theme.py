@@ -98,13 +98,13 @@ QToolTip {
 QToolBar {
     background: $chrome; border: 0;
     border-bottom: 1px solid $border;
-    padding: 6px 10px; spacing: 4px;
+    padding: 4px 10px; spacing: 4px;
 }
 QToolBar::separator { background: $border; width: 1px; margin: 4px 6px; }
 QToolBar QToolButton {
     background: transparent; border: 0;
-    min-width: 32px; min-height: 32px;
-    padding: 6px 10px; margin: 0 2px;
+    min-width: 32px; min-height: 28px;
+    padding: 4px 8px; margin: 0 2px;
     border-radius: $radius; font-size: 15px; color: $text;
 }
 QToolBar QToolButton:hover { background: $hover; }
