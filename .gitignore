@@ -33,3 +33,5 @@ desktop.ini
 
 # 日志
 *.log
+# icon source (regenerate .ico via make_ico.py)
+resources/purebrowser_source.png
