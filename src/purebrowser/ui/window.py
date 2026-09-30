@@ -141,6 +141,12 @@ if IS_WINDOWS:
             ("dwFlags", wintypes.DWORD),
         ]
 
+    class _NCCALCSIZE_PARAMS(ctypes.Structure):
+        _fields_ = [
+            ("rgrc", wintypes.RECT * 3),
+            ("lppos", ctypes.c_void_p),
+        ]
+
     _user32.GetWindowLongPtrW.restype = ctypes.c_void_p
     _user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
     _user32.SetWindowLongPtrW.restype = ctypes.c_void_p
@@ -181,6 +187,9 @@ if IS_WINDOWS:
 
     _user32.TrackMouseEvent.restype = wintypes.BOOL
     _user32.TrackMouseEvent.argtypes = [ctypes.POINTER(_TRACKMOUSEEVENT)]
+
+    _user32.IsZoomed.restype = wintypes.BOOL
+    _user32.IsZoomed.argtypes = [wintypes.HWND]
 
 
 def _fmt_ptr(value) -> str:
@@ -855,7 +864,9 @@ class MainWindow(QMainWindow):
             if IS_WINDOWS and bytes(eventType) == b"windows_generic_MSG":
                 msg = wintypes.MSG.from_address(int(message))
                 if msg.message == WM_NCCALCSIZE and msg.wParam:
-                    return True, 0  # 客户区铺满整个窗口 → 去掉系统 caption
+                    # 客户区铺满整个窗口 → 去掉系统 caption；最大化时对齐工作区。
+                    self._adjust_maximized_client(msg)
+                    return True, 0
                 if msg.message == WM_ERASEBKGND:
                     return True, 1  # 由 Qt 负责重绘背景，禁止系统擦除
                 if msg.message == WM_ENTERSIZEMOVE:
@@ -884,6 +895,27 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         return False, 0
+
+    def _adjust_maximized_client(self, msg) -> None:
+        """最大化时把客户区对齐 monitor 工作区，消除系统 resize 边框对
+        标签栏顶部 / 状态栏底部的 11px 遮挡（SM_CXSIZEFRAME+CXPADDEDBORDER）。"""
+        if not IS_WINDOWS or not _user32.IsZoomed(msg.hWnd):
+            return
+        mon = _user32.MonitorFromWindow(msg.hWnd, MONITOR_DEFAULTTONEAREST)
+        if not mon:
+            return
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if not _user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+            return
+        params = ctypes.cast(
+            ctypes.c_void_p(msg.lParam), ctypes.POINTER(_NCCALCSIZE_PARAMS)
+        ).contents
+        work = info.rcWork
+        params.rgrc[0].left = work.left
+        params.rgrc[0].top = work.top
+        params.rgrc[0].right = work.right
+        params.rgrc[0].bottom = work.bottom
 
     def _caption_button_at(self, msg):
         """非客户鼠标消息的屏幕坐标 → 命中的标题按钮（无则 None）。"""
