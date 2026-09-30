@@ -197,6 +197,7 @@ class _TitleButton(QToolButton):
         super().__init__(parent)
         self._normal_icon = None
         self._hover_icon = None
+        self._tip = ""
 
     def set_icons(self, normal, hover=None) -> None:
         self._normal_icon = normal
@@ -591,7 +592,7 @@ class MainWindow(QMainWindow):
         btn.set_icons(normal, hover)
         btn.setIconSize(QSize(size, size))
         btn.setFixedSize(46, 38)
-        btn.setToolTip(tip)
+        btn._tip = tip  # tooltip 由 MainWindow 轮询自管（Qt tooltip 会在非客户区错显）
         btn.clicked.connect(slot)
         return btn
 
@@ -600,7 +601,7 @@ class MainWindow(QMainWindow):
             return
         name = "restore" if maximized else "maximize"
         self.win_max.set_icons(icons.icon(name, self.theme.text, 10), None)
-        self.win_max.setToolTip("还原" if maximized else "最大化")
+        self.win_max._tip = "还原" if maximized else "最大化"
 
     def _update_max_icon(self) -> None:
         self._set_max_icon(self.isMaximized())
@@ -914,7 +915,10 @@ class MainWindow(QMainWindow):
         if target is not None:
             target.set_hovered(True)
         self._hover_btn = target
-        QToolTip.hideText()
+        if target is not None and getattr(target, "_tip", ""):
+            QToolTip.showText(QCursor.pos(), target._tip, target)
+        else:
+            QToolTip.hideText()
 
     def _freeze_begin(self) -> None:
         """用户开始拖动/调整窗口：抓当前 WebEngine 画面，用 overlay 拉伸显示。"""
