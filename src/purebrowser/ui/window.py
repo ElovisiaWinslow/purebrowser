@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         self.toolbar = QToolBar("Main", self)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(18, 18))
-        self.toolbar.setFixedHeight(46)
+        self.toolbar.setFixedHeight(56)
 
         self.back = self.toolbar.addAction(icons.icon("back", self.theme.text), "")
         self.back.setToolTip("后退")
