@@ -48,6 +48,16 @@ class PurePage(QWebEnginePage):
         self.fullscreen_toggled.emit(request.toggleOn())
 
 
+class PureView(QWebEngineView):
+    """接管右键：把 context-menu 请求与全局坐标交给 MainWindow 构建中文菜单。"""
+
+    context_menu_requested = pyqtSignal(object, object)
+
+    def contextMenuEvent(self, event) -> None:
+        self.context_menu_requested.emit(self.lastContextMenuRequest(), event.globalPos())
+        event.accept()
+
+
 class Tab(QWidget):
     title_changed = pyqtSignal(str)
     url_changed = pyqtSignal(QUrl)
@@ -60,7 +70,7 @@ class Tab(QWidget):
 
     def __init__(self, profile: QWebEngineProfile, parent=None, page: QWebEnginePage = None):
         super().__init__(parent)
-        self.view = QWebEngineView(self)
+        self.view = PureView(self)
 
         if page is None:
             page = PurePage(profile, self.view)

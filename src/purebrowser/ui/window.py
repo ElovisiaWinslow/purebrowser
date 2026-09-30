@@ -5,7 +5,7 @@ import time
 from ctypes import wintypes
 from datetime import date, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
@@ -17,8 +17,13 @@ from PyQt6.QtGui import (
     QPixmap,
     QShortcut,
 )
-from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PyQt6.QtWebEngineCore import (
+    QWebEngineContextMenuRequest,
+    QWebEnginePage,
+    QWebEngineProfile,
+)
 from PyQt6.QtWidgets import (
+    QApplication,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QMainWindow,
@@ -1238,6 +1243,94 @@ class MainWindow(QMainWindow):
         action.setEnabled(False)
         menu.addAction(action)
 
+    def _show_context_menu(self, tab, req, pos) -> None:
+        """自定义中文右键菜单（按 lastContextMenuRequest 上下文动态构建）。"""
+        page = tab.view.page()
+        if page is None:
+            return
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._apply_shadow(menu)
+
+        def page_action(text, wa):
+            act = page.action(wa)
+            item = menu.addAction(text)
+            item.setEnabled(bool(act.isEnabled()) if act is not None else False)
+            item.triggered.connect(lambda checked=False, w=wa: page.triggerAction(w))
+
+        link = req.linkUrl() if req is not None else None
+        media = req.mediaUrl() if req is not None else None
+        if req is not None:
+            mtype = req.mediaType()
+            selected = req.selectedText() or ""
+            editable = bool(req.isContentEditable())
+            flags = req.editFlags()
+        else:
+            mtype = QWebEngineContextMenuRequest.MediaType.MediaTypeNone
+            selected = ""
+            editable = False
+            flags = QWebEngineContextMenuRequest.EditFlag(0)
+
+        has_link = link is not None and link.isValid()
+        has_image = (
+            media is not None and media.isValid()
+            and mtype == QWebEngineContextMenuRequest.MediaType.MediaTypeImage
+        )
+
+        if has_link:
+            a = menu.addAction("在新标签打开链接")
+            a.triggered.connect(lambda checked=False, u=link: self.new_tab(u))
+            a = menu.addAction("复制链接地址")
+            a.triggered.connect(
+                lambda checked=False, u=link: QApplication.clipboard().setText(u.toString())
+            )
+            menu.addSeparator()
+        if has_image:
+            a = menu.addAction("图片另存为")
+            a.triggered.connect(lambda checked=False, u=media: page.download(u))
+            a = menu.addAction("复制图片地址")
+            a.triggered.connect(
+                lambda checked=False, u=media: QApplication.clipboard().setText(u.toString())
+            )
+            a = menu.addAction("在新标签打开图片")
+            a.triggered.connect(lambda checked=False, u=media: self.new_tab(u))
+            menu.addSeparator()
+        if editable:
+            Edit = QWebEngineContextMenuRequest.EditFlag
+            for text, flag, wa in (
+                ("撤销", Edit.CanUndo, QWebEnginePage.WebAction.Undo),
+                ("重做", Edit.CanRedo, QWebEnginePage.WebAction.Redo),
+                ("剪切", Edit.CanCut, QWebEnginePage.WebAction.Cut),
+                ("复制", Edit.CanCopy, QWebEnginePage.WebAction.Copy),
+                ("粘贴", Edit.CanPaste, QWebEnginePage.WebAction.Paste),
+                ("全选", Edit.CanSelectAll, QWebEnginePage.WebAction.SelectAll),
+            ):
+                if flags & flag:
+                    page_action(text, wa)
+            menu.addSeparator()
+        elif selected:
+            a = menu.addAction("复制")
+            a.triggered.connect(
+                lambda checked=False: page.triggerAction(QWebEnginePage.WebAction.Copy)
+            )
+            engine = self.settings.get("search_engine", "bing")
+            template = SEARCH_ENGINES.get(engine, SEARCH_ENGINES["bing"])
+            engine_label = {
+                "bing": "Bing", "baidu": "百度",
+                "duckduckgo": "DuckDuckGo", "google": "Google",
+            }.get(engine, engine)
+            label = selected if len(selected) <= 20 else selected[:20] + "\u2026"
+            a = menu.addAction(f"用 {engine_label} 搜索\u201c{label}\u201d")
+            a.triggered.connect(
+                lambda checked=False, u=template.format(q=quote_plus(selected)): self.new_tab(QUrl(u))
+            )
+            menu.addSeparator()
+
+        page_action("后退", QWebEnginePage.WebAction.Back)
+        page_action("前进", QWebEnginePage.WebAction.Forward)
+        page_action("刷新", QWebEnginePage.WebAction.Reload)
+        menu.popup(pos)
+
     def _populate_history_menu(self) -> None:
         self.history_menu.clear()
         rows_map: dict = {}
@@ -1498,6 +1591,9 @@ class MainWindow(QMainWindow):
             lambda _ok=False, t=tab: self._apply_site_zoom(t.view, t.view.url())
         )
         tab.icon_changed.connect(lambda icon, t=tab: self._on_tab_icon(t, icon))
+        tab.view.context_menu_requested.connect(
+            lambda req, pos, t=tab: self._show_context_menu(t, req, pos)
+        )
         self._apply_tab_icon(tab)
         tab.view.installEventFilter(self)
         self._ensure_wheel_filter(tab.view)
