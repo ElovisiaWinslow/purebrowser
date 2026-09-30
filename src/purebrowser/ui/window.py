@@ -1294,6 +1294,8 @@ class MainWindow(QMainWindow):
         if has_link:
             a = menu.addAction("在新标签打开链接")
             a.triggered.connect(lambda checked=False, u=link: self.new_tab(u))
+            a = menu.addAction("链接另存为")
+            a.triggered.connect(lambda checked=False, u=link: page.download(u))
             a = menu.addAction("复制链接地址")
             a.triggered.connect(
                 lambda checked=False, u=link: QApplication.clipboard().setText(u.toString())
