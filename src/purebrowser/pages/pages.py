@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import QFileDialog
 
 from purebrowser.data import favicons
 from purebrowser.data import history as history_mod
-from purebrowser.core.locations import default_download_dir, set_data_dir
+from purebrowser.core.locations import default_download_dir, resource_path, set_data_dir
 
-NEWTAB_HTML_PATH = Path(__file__).resolve().parents[3] / "resources" / "newtab.html"
+NEWTAB_HTML_PATH = resource_path("newtab.html")
 
 REFRESH_SNIPPET = (
     b"<html><head><meta charset='utf-8'></head>"
