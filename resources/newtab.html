@@ -65,5 +65,23 @@
       <button type="submit">搜索</button>
     </form>
   </main>
+  <script>
+  // Ctrl+F 网页优先：未处理时打印暗号，交给 PurePage → MainWindow 打开查找条。
+  // （与 window.py 注入的 profile 脚本同源；__pbFindHooked 防重复安装。）
+  (function () {
+    if (window.__pbFindHooked) return;
+    window.__pbFindHooked = true;
+    window.addEventListener('keydown', function (e) {
+      if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+      if (e.key !== 'f' && e.key !== 'F') return;
+      var ev = e;
+      setTimeout(function () {
+        if (!ev.defaultPrevented) {
+          try { console.log('__PB_FIND__'); } catch (err) {}
+        }
+      }, 0);
+    }, true);
+  })();
+  </script>
 </body>
 </html>

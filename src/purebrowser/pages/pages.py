@@ -162,6 +162,23 @@ function render(filter) {
 document.getElementById('q').addEventListener('input', e => render(e.target.value));
 render('');
 </script>
+<script>
+// Ctrl+F 网页优先：未处理时打印暗号，交给 PurePage → MainWindow 打开查找条。
+(function () {
+  if (window.__pbFindHooked) return;
+  window.__pbFindHooked = true;
+  window.addEventListener('keydown', function (e) {
+    if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+    if (e.key !== 'f' && e.key !== 'F') return;
+    var ev = e;
+    setTimeout(function () {
+      if (!ev.defaultPrevented) {
+        try { console.log('__PB_FIND__'); } catch (err) {}
+      }
+    }, 0);
+  }, true);
+})();
+</script>
 </body></html>
 """
 
@@ -263,8 +280,8 @@ SETTINGS_TEMPLATE = """<!doctype html>
     <h2>启动</h2>
     <div class="row">
       <label>
-        恢复上次会话
-        <div class="desc">启动时重新打开上次关闭的标签页</div>
+        启动时询问是否恢复会话
+        <div class="desc">启动时弹出提示，询问是否恢复上次关闭的标签页</div>
       </label>
       <label class="switch">
         <input type="checkbox" id="restore"
@@ -363,6 +380,23 @@ document.getElementById('interceptor').checked = __INTERCEPTOR__;
 document.getElementById('doh').checked = __DOH__;
 document.getElementById('restore').checked = __RESTORE__;
 document.getElementById('theme').value = "__THEME__";
+</script>
+<script>
+// Ctrl+F 网页优先：未处理时打印暗号，交给 PurePage → MainWindow 打开查找条。
+(function () {
+  if (window.__pbFindHooked) return;
+  window.__pbFindHooked = true;
+  window.addEventListener('keydown', function (e) {
+    if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+    if (e.key !== 'f' && e.key !== 'F') return;
+    var ev = e;
+    setTimeout(function () {
+      if (!ev.defaultPrevented) {
+        try { console.log('__PB_FIND__'); } catch (err) {}
+      }
+    }, 0);
+  }, true);
+})();
 </script>
 </body></html>
 """

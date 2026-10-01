@@ -52,5 +52,5 @@ def run(argv: list[str] | None = None) -> int:
 
     data_dir = get_data_dir()
     win = MainWindow(data_dir)
-    win.show()
+    win.start()
     return app.exec()

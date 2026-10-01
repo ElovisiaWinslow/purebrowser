@@ -60,6 +60,9 @@ class DownloadManager(QObject):
             "finished_at": None,
             "state_text": "inprogress",
             "db_id": None,
+            "speed": 0.0,          # 字节/秒（EMA）
+            "_speed_t": None,      # 上次测速时间
+            "_speed_b": 0,         # 上次测速字节数
         }
         self.records.append(rec)
         rec["db_id"] = downloads_store.save(self.conn, rec)
@@ -83,8 +86,25 @@ class DownloadManager(QObject):
         rec = self._rec(req)
         if rec is None:
             return
-        rec["received"] = req.receivedBytes()
+        received = req.receivedBytes()
+        now = time.monotonic()
+        last_t = rec.get("_speed_t")
+        if last_t is not None:
+            dt = now - last_t
+            if dt >= 0.25:
+                inst = max(0.0, (received - rec.get("_speed_b", 0)) / dt)
+                prev = rec.get("speed", 0.0)
+                # EMA：平滑瞬时速度，避免数字乱跳
+                rec["speed"] = inst if prev <= 0 else (prev * 0.6 + inst * 0.4)
+                rec["_speed_t"] = now
+                rec["_speed_b"] = received
+        else:
+            rec["_speed_t"] = now
+            rec["_speed_b"] = received
+        rec["received"] = received
         rec["total"] = req.totalBytes() or rec["total"]
+        if req.isPaused():
+            rec["speed"] = 0.0
         self.changed.emit()
 
     def _on_state(self, req: QWebEngineDownloadRequest) -> None:
@@ -98,6 +118,8 @@ class DownloadManager(QObject):
             rec["interrupt_reason"] = req.interruptReasonString() or ""
         rec["received"] = req.receivedBytes()
         rec["total"] = req.totalBytes() or rec["total"]
+        rec["speed"] = 0.0
+        rec["_speed_t"] = None
         if req.isFinished():
             rec["finished"] = True
             rec["canceled"] = req.state() != _State.DownloadCompleted

@@ -22,13 +22,13 @@ from PyQt6.QtWebEngineCore import (
     QWebEngineContextMenuRequest,
     QWebEnginePage,
     QWebEngineProfile,
+    QWebEngineScript,
 )
 from PyQt6.QtWidgets import (
     QApplication,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
-    QMenu,
     QProgressBar,
     QTabBar,
     QToolBar,
@@ -36,7 +36,6 @@ from PyQt6.QtWidgets import (
     QToolTip,
     QVBoxLayout,
     QWidget,
-    QWidgetAction,
 )
 
 from purebrowser.core.interceptor import Blocker
@@ -54,10 +53,15 @@ from purebrowser.data.storage import connect
 from purebrowser.ui import icons
 from purebrowser.ui import theme as theme_mod
 from purebrowser.ui.freeze_overlay import FreezeOverlay
-from purebrowser.ui.hud import DownloadToast, FindHud, WheelZoomFilter, ZoomHud
+from purebrowser.ui.hud import FindHud, WheelZoomFilter, ZoomHud
+from purebrowser.ui.context_menu import ContextMenu
+from purebrowser.ui.context_menu import action as menu_action
+from purebrowser.ui.context_menu import separator as menu_separator
+from purebrowser.ui.dropdown import DropdownPanel
 from purebrowser.ui.menu_rows import MenuRow
+from purebrowser.ui.session_prompt import SessionPrompt
 from purebrowser.ui.tab_area import TabArea
-from purebrowser.ui.tab import Tab, to_url
+from purebrowser.ui.tab import FIND_SENTINEL, Tab, to_url
 from purebrowser.ui.tabbar import AdaptiveTabBar
 from purebrowser.ui.urlbar import UrlBar
 
@@ -83,8 +87,13 @@ if IS_WINDOWS:
     SWP_NOSIZE = 0x0001
     SWP_NOMOVE = 0x0002
     SWP_NOZORDER = 0x0004
+    SWP_NOACTIVATE = 0x0010
     SWP_FRAMECHANGED = 0x0020
     HWND_TOP = 0
+    # 全屏时把窗口提到 topmost，盖住始终置顶的任务栏（否则第二次全屏起
+    # 任务栏会从底部露出来，看起来像浅蓝色边框/圆角）。
+    HWND_TOPMOST = -1
+    HWND_NOTOPMOST = -2
 
     MONITOR_DEFAULTTONEAREST = 0x00000002
 
@@ -177,6 +186,9 @@ if IS_WINDOWS:
     _user32.IsZoomed.restype = wintypes.BOOL
     _user32.IsZoomed.argtypes = [wintypes.HWND]
 
+    _user32.SetForegroundWindow.restype = wintypes.BOOL
+    _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
 
 def _fmt_ptr(value) -> str:
     if value is None:
@@ -188,6 +200,33 @@ def _fmt_ptr(value) -> str:
 ZOOM_MIN = 0.25
 ZOOM_MAX = 5.0
 ZOOM_STEP = 1.1
+
+# Ctrl+F：注入脚本只在网页自身未处理（未 preventDefault）时打印暗号，
+# 由 PurePage.javaScriptConsoleMessage 转成信号。这样 Overleaf 等自带 Ctrl+F
+# 的页面优先，浏览器只在网页不用时才弹出查找条。
+_FIND_HOOK_JS = (
+    "(function(){"
+    "if(window.__pbFindHooked)return;window.__pbFindHooked=true;"
+    "window.addEventListener('keydown',function(e){"
+    "if(!e.ctrlKey||e.shiftKey||e.altKey||e.metaKey)return;"
+    "if(e.key!=='f'&&e.key!=='F')return;"
+    "var ev=e;"
+    "setTimeout(function(){"
+    "if(!ev.defaultPrevented){try{console.log('" + FIND_SENTINEL + "');}catch(err){}}"
+    "},0);"
+    "},true);"
+    "})();"
+)
+
+
+def _build_find_hook_script() -> QWebEngineScript:
+    script = QWebEngineScript()
+    script.setName("purebrowser-find-hook")
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+    script.setRunsOnSubFrames(True)
+    script.setSourceCode(_FIND_HOOK_JS)
+    return script
 
 
 class _TitleButton(QToolButton):
@@ -220,6 +259,8 @@ class MainWindow(QMainWindow):
     def __init__(self, data_dir: Path):
         super().__init__()
         self.setWindowTitle("PureBrowser")
+        # 上次窗口化时的几何（最大化期间也保持这个值，避免 normalGeometry 的边框误差累积）
+        self._last_normal_rect = None
         self.resize(1200, 800)
         self.setMinimumSize(800, 600)
 
@@ -229,6 +270,8 @@ class MainWindow(QMainWindow):
         self._fullscreen_source = None
         self._saved_placement = None
         self._saved_style = None
+        # 最大化状态的唯一来源（不每次查 OS，避免 isMaximized/IsZoomed 失配）。
+        self._maximized = False
 
         # 全屏时序调试探针（PUREBROWSER_FS_DEBUG=1 开启）
         self._fs_debug = bool(os.environ.get("PUREBROWSER_FS_DEBUG", "").strip())
@@ -247,6 +290,8 @@ class MainWindow(QMainWindow):
 
         self.blocker = Blocker(self.settings, netlog_path=netlog_path)
         self.profile: QWebEngineProfile = build_profile(self.data_dir, self.blocker)
+        # Ctrl+F 网页优先：脚本注入在所有页面（含 iframe）最早期。
+        self.profile.scripts().insert(_build_find_hook_script())
         self.scheme_handler = PureBrowserSchemeHandler(
             self.settings, self.conn, self.data_dir, self, theme=self.theme
         )
@@ -313,7 +358,7 @@ class MainWindow(QMainWindow):
         self._build_statusbar()
         self._build_zoom_hud()
         self._build_find_hud()
-        self._build_download_toast()
+        self._build_dropdowns()
         self._build_tab_plus()
 
         # 三键 hover：轮询光标统一驱动（非客户区 max 收不到 Qt enter/leave）。
@@ -332,10 +377,167 @@ class MainWindow(QMainWindow):
         self._session_timer.setInterval(800)
         self._session_timer.timeout.connect(self._save_session)
 
-        self._restore_session()
+        # 会话恢复：读一次快照，决定是否需要弹"恢复会话"提示；先开一个占位
+        # newtab（首屏与测试都依赖 current() 有标签）。
+        self._saved_session = session.load(self.data_dir)
+        self._pending_restore = self._compute_pending_restore(self._saved_session)
+        self._prompt_card = None
+        self._start_maximized = False
+        self._start_rect = None
+        self._apply_startup_geometry(self._saved_session.get("window") or {})
+        self.new_tab(NEWTAB_URL)
 
         self._relayout_tabs()
         self._update_max_icon()
+
+    # ---------- session startup ----------
+    def _compute_pending_restore(self, data: dict):
+        """返回 (tabs, active) 供弹窗恢复；不需要恢复时返回 None。"""
+        if not self.settings.get("restore_session", True):
+            return None
+        kept = []
+        for i, t in enumerate(data.get("tabs", []) or []):
+            url = (t.get("url") or "").strip()
+            if not url or url.startswith("purebrowser://newtab"):
+                continue
+            kept.append((i, {"url": url, "title": t.get("title", "")}))
+        if not kept:
+            return None
+        tabs = [t for _i, t in kept]
+        active = data.get("active", -1)
+        target = len(tabs) - 1
+        for pos, (orig, _t) in enumerate(kept):
+            if orig == active:
+                target = pos
+                break
+        return tabs, max(0, min(int(target), len(tabs) - 1))
+
+    def _apply_startup_geometry(self, win_state: dict) -> None:
+        """解析上次的窗口状态：仅记录，实际在 start() 里 apply（见下）。
+
+        自愈：早期版本在最大化时会把最大化几何写进 window.w/h，导致保存的"窗口化
+        尺寸"= 工作区尺寸，于是点"还原"看着没变。这里若 maximized 且尺寸≈工作区，
+        判为坏值，改用默认窗口矩形。
+        """
+        self._start_maximized = bool(win_state.get("maximized"))
+        rect = None
+        try:
+            w = int(win_state.get("w") or 0)
+            h = int(win_state.get("h") or 0)
+            x = int(win_state.get("x"))
+            y = int(win_state.get("y"))
+            if w > 0 and h > 0:
+                rect = QRect(x, y, w, h)
+        except (TypeError, ValueError):
+            rect = None
+        if rect is not None and self._start_maximized and self._looks_like_workarea(rect):
+            rect = None
+        self._start_rect = rect if rect is not None else self._default_window_rect()
+
+    @staticmethod
+    def _looks_like_workarea(rect: QRect) -> bool:
+        from PyQt6.QtGui import QGuiApplication
+
+        for screen in QGuiApplication.screens():
+            g = screen.availableGeometry()
+            if rect.width() >= g.width() * 0.98 and rect.height() >= g.height() * 0.98:
+                return True
+        return False
+
+    @staticmethod
+    def _default_window_rect() -> QRect:
+        """默认窗口化矩形：1200×800（受工作区限制）并居中。"""
+        from PyQt6.QtGui import QGuiApplication
+
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, 1200, 800)
+        g = screen.availableGeometry()
+        w = min(1200, max(400, g.width() - 80))
+        h = min(800, max(300, g.height() - 80))
+        x = g.left() + (g.width() - w) // 2
+        y = g.top() + (g.height() - h) // 2
+        return QRect(x, y, w, h)
+
+    def _clamp_start_rect(self) -> None:
+        """确保恢复的窗口矩形与当前某个屏幕的工作区相交（换了显示器时兜底）。"""
+        from PyQt6.QtGui import QGuiApplication
+
+        rect = self._start_rect
+        if rect is None:
+            self._start_rect = self._default_window_rect()
+            rect = self._start_rect
+        for screen in QGuiApplication.screens():
+            if screen.availableGeometry().intersects(rect):
+                return
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        g = screen.availableGeometry()
+        self._start_rect = QRect(g.left() + 60, g.top() + 60, rect.width(), rect.height())
+
+    def start(self) -> None:
+        """应用启动入口：按上次状态显示窗口，必要时弹出恢复会话提示。
+
+        注意：setGeometry 必须在 show() 之后再落一次——窗口首次显示时 Qt/Windows
+        会按窗口边框做一次尺寸膨胀（本窗口自绘无边框，膨胀会污染下次保存的尺寸）。
+        """
+        self._clamp_start_rect()
+        if self._start_rect is not None:
+            self.setGeometry(self._start_rect)
+        self.show()
+        self._ensure_state_probe()
+        if self._start_rect is not None:
+            self.setGeometry(self._start_rect)
+        self._maximized = bool(self._start_maximized)
+        if self._maximized:
+            self.showMaximized()
+        # 显式刷成启动状态；下一拍按真实 IsZoomed 对账一次（外部/系统态）。
+        self._set_max_icon(self._maximized)
+        QTimer.singleShot(0, self._update_max_icon)
+        if self._pending_restore:
+            QTimer.singleShot(0, self._ask_restore)
+
+
+    def _ask_restore(self) -> None:
+        if not self._pending_restore:
+            return
+        tabs, active = self._pending_restore
+        card = SessionPrompt(self.theme, self.tabs.stack())
+        card.set_count(len(tabs))
+        card.restore.connect(lambda: self._resolve_restore(True))
+        card.skip.connect(lambda: self._resolve_restore(False))
+        self._prompt_card = card
+        card.show_card()
+
+    def _resolve_restore(self, restore: bool) -> None:
+        pending = self._pending_restore
+        self._pending_restore = None
+        if self._prompt_card is not None:
+            self._prompt_card.hide()
+            self._prompt_card = None
+        if restore and pending:
+            self._load_tabs(pending[0], pending[1])
+        self._schedule_session_save()
+
+    def _load_tabs(self, tabs: list, active: int) -> None:
+        """把上次会话的标签页装回来；复用占位 newtab，避免"最后一个标签"限制。"""
+        urls = [t.get("url") for t in tabs if t.get("url")]
+        if not urls:
+            return
+        rest = urls
+        if self.tabs.count() == 1:
+            cur = self._current()
+            if isinstance(cur, Tab) and self._tab_urls.get(cur, "").startswith(
+                "purebrowser://newtab"
+            ):
+                cur.load(QUrl(urls[0]))
+                self._tab_urls[cur] = urls[0]
+                rest = urls[1:]
+        for u in rest:
+            self.new_tab(QUrl(u))
+        target = active if 0 <= active < len(urls) else len(urls) - 1
+        self.tabs.setCurrentIndex(max(0, min(target, self.tabs.count() - 1)))
 
     # ---------- UI ----------
     def _build_toolbar(self) -> None:
@@ -365,52 +567,86 @@ class MainWindow(QMainWindow):
         self.history_btn = QToolButton(self)
         self.history_btn.setIcon(icons.icon("clock", self.theme.text))
         self.history_btn.setToolTip("历史记录")
-        self.history_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.history_menu = QMenu(self.history_btn)
-        self.history_btn.setMenu(self.history_menu)
-        self.history_menu.aboutToShow.connect(self._populate_history_menu)
+        self.history_btn.clicked.connect(
+            lambda: self._toggle_dropdown("history", self.history_btn)
+        )
         self.toolbar.addWidget(self.history_btn)
 
         self.bookmarks_btn = QToolButton(self)
         self.bookmarks_btn.setIcon(icons.icon("bookmark", self.theme.text))
         self.bookmarks_btn.setToolTip("书签")
-        self.bookmarks_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.bookmarks_menu = QMenu(self.bookmarks_btn)
-        self.bookmarks_btn.setMenu(self.bookmarks_menu)
-        self.bookmarks_menu.aboutToShow.connect(self._populate_bookmarks_menu)
+        self.bookmarks_btn.clicked.connect(
+            lambda: self._toggle_dropdown("bookmarks", self.bookmarks_btn)
+        )
         self.toolbar.addWidget(self.bookmarks_btn)
 
         self.download_btn = QToolButton(self)
         self.download_btn.setIcon(icons.icon("download", self.theme.text))
         self.download_btn.setToolTip("下载")
-        self.download_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.download_menu = QMenu(self.download_btn)
-        self.download_btn.setMenu(self.download_menu)
-        self.download_menu.aboutToShow.connect(self._populate_download_menu)
+        self.download_btn.clicked.connect(
+            lambda: self._toggle_dropdown("download", self.download_btn)
+        )
         self.toolbar.addWidget(self.download_btn)
+
+        # 下载中角标：红底白字数量，浮在工具栏上、叠在按钮右上角（子控件会被
+        # 按钮矩形裁剪，故挂在工具栏而非按钮上）。
+        self.dl_badge = QLabel(self.toolbar)
+        self.dl_badge.setObjectName("dlBadge")
+        self.dl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.dl_badge.setFixedSize(15, 15)
+        self.dl_badge.setStyleSheet(
+            f"#dlBadge {{ background: {self.theme.danger}; color: #FFFFFF;"
+            " border-radius: 7px; font-size: 9px; font-weight: 600; }"
+        )
+        self.dl_badge.setVisible(False)
+        self.download_btn.installEventFilter(self)
+        self.toolbar.installEventFilter(self)
 
         settings_action = self.toolbar.addAction(icons.icon("settings", self.theme.text), "")
         settings_action.setToolTip("设置")
         settings_action.triggered.connect(self._open_settings)
 
-        self._apply_shadow(self.toolbar)
-        self._apply_shadow(self.history_menu)
-        self._apply_shadow(self.bookmarks_menu)
-        self._apply_shadow(self.download_menu)
+        # 不用 QGraphicsDropShadowEffect：带阴影的工具栏每次重绘要重新离屏渲染
+        # + 高斯模糊（实测 3.4ms vs 无阴影 0.44ms，8 倍），会与视频合成抢 GUI 线程。
+        # 阴影由 QSS 边框替代。
 
-        # 富行菜单：hover 由 QMenu.hovered 驱动（QWidgetAction 行背景不透明）。
-        # 行映射挂在各菜单对象上（menu._row_map），子菜单销毁即释放，避免泄漏。
-        for _m in (self.history_menu, self.bookmarks_menu, self.download_menu):
-            _m.hovered.connect(lambda a, m=_m: self._on_menu_hovered(m, a))
-            _m.installEventFilter(self)
+    def _build_dropdowns(self) -> None:
+        """历史/书签/下载共用的自绘可滚动下拉面板（非 QMenu，见 ui/dropdown.py）。"""
+        self._dropdowns = {
+            "history": DropdownPanel(self.theme),
+            "bookmarks": DropdownPanel(self.theme),
+            "download": DropdownPanel(self.theme),
+        }
+        self._dl_live_timer = QTimer(self)
+        self._dl_live_timer.setInterval(200)
+        self._dl_live_timer.timeout.connect(self._update_download_panel)
 
-    @staticmethod
-    def _apply_shadow(widget, blur: int = 12, dy: int = 2, alpha: int = 30) -> None:
-        effect = QGraphicsDropShadowEffect(widget)
-        effect.setBlurRadius(blur)
-        effect.setOffset(0, dy)
-        effect.setColor(QColor(0, 0, 0, alpha))
-        widget.setGraphicsEffect(effect)
+    def _toggle_dropdown(self, kind: str, anchor) -> None:
+        panel = self._dropdowns[kind]
+        if panel.isVisible():
+            panel.hide()
+            if kind == "download":
+                self._dl_live_timer.stop()
+            return
+        if kind == "history":
+            self._fill_history_panel(panel)
+        elif kind == "bookmarks":
+            self._fill_bookmarks_panel(panel)
+        elif kind == "download":
+            self._fill_download_panel(panel)
+        panel.open_below(anchor)
+        if kind == "download":
+            self._dl_live_timer.start()
+
+    def _position_download_badge(self) -> None:
+        if not hasattr(self, "dl_badge"):
+            return
+        b = self.dl_badge
+        tl = self.download_btn.mapTo(self.toolbar, QPoint(0, 0))
+        x = tl.x() + self.download_btn.width() - b.width() + 3
+        y = max(0, tl.y() - 1)
+        b.move(x, y)
+        b.raise_()
 
     def _build_find_hud(self) -> None:
         """查找条改为右上角浮层（复用一个 FloatingHud），不再挤动页面布局。"""
@@ -425,6 +661,14 @@ class MainWindow(QMainWindow):
         text = self.find_hud.input.text()
         if text:
             self._on_find_text_changed(text)
+
+    def _on_shortcut_unhandled(self, tab, action: str) -> None:
+        """注入脚本报告网页未处理 Ctrl+F：仅当前标签打开查找条。"""
+        if action != "find":
+            return
+        if tab is not self.tabs.currentWidget():
+            return
+        self._show_find_bar()
 
     def _hide_find_bar(self) -> None:
         if not self.find_hud.isVisible():
@@ -491,12 +735,6 @@ class MainWindow(QMainWindow):
         self._wheel_filter = WheelZoomFilter(self._zoom_step)
         self._wheel_targets: set = set()
 
-    def _build_download_toast(self) -> None:
-        # 右下角浮层，上移 56px 让开同位的 ZoomHud。
-        self.download_toast = DownloadToast(self.tabs.stack())
-        self.download_toast.clicked.connect(self._open_download_menu_from_toast)
-        self.downloads.changed.connect(self._on_downloads_changed)
-
     def _ensure_wheel_filter(self, view) -> None:
         fp = view.focusProxy()
         if fp is None or fp in self._wheel_targets:
@@ -506,20 +744,13 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         # view 首次显示/打磨后 focusProxy 才可用：此时挂上滚轮过滤器。
-        if event.type() in (QEvent.Type.Show, QEvent.Type.Polish):
+        et = event.type()
+        if et in (QEvent.Type.Show, QEvent.Type.Polish):
             self._ensure_wheel_filter(obj)
-        elif isinstance(obj, QMenu) and event.type() == QEvent.Type.MouseButtonPress:
-            self._menu_note_click(obj, event)
+        elif et in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.LayoutRequest):
+            if obj is getattr(self, "toolbar", None) or obj is getattr(self, "download_btn", None):
+                self._position_download_badge()
         return super().eventFilter(obj, event)
-
-    @staticmethod
-    def _menu_note_click(menu, event) -> None:
-        """记录本次菜单点击是否要新标签打开（中键 / Ctrl+左键）。"""
-        new_tab = event.button() == Qt.MouseButton.MiddleButton or (
-            event.button() == Qt.MouseButton.LeftButton
-            and bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-        )
-        menu._last_new_tab = new_tab
 
     # ---------- 页面缩放 ----------
     def _site_zoom(self) -> dict:
@@ -603,26 +834,38 @@ class MainWindow(QMainWindow):
         self.win_max.set_icons(icons.icon(name, self.theme.text, 10), None)
         self.win_max._tip = "还原" if maximized else "最大化"
 
-    def _update_max_icon(self) -> None:
-        self._set_max_icon(self.isMaximized())
+    def _is_zoomed(self) -> bool:
+        """窗口是否最大化——以原生 IsZoomed 为准。
 
-    @staticmethod
-    def _snap_supported() -> bool:
-        try:
-            return sys.getwindowsversion().build >= 22000
-        except Exception:
-            return False
+        本窗口自绘无边框 + 原生 ShowWindow，Qt 的 isMaximized() 偶尔与实际
+        OS 状态不一致，会导致"图标显示还原、点击却当没最大化又去最大化"。
+        """
+        if IS_WINDOWS:
+            try:
+                return bool(_user32.IsZoomed(self._hwnd()))
+            except Exception:
+                pass
+        return self.isMaximized()
+
+    def _update_max_icon(self) -> None:
+        # 外部改动（Win+↑/贴靠/系统还原等）时用 IsZoomed 校正一次 flag。
+        self._maximized = self._is_zoomed()
+        self._set_max_icon(self._maximized)
 
     def _toggle_maximize(self) -> None:
-        # isMaximized() 会滞后一拍，先用它算出"本次意图"，再据此设置图标（B）。
-        will_max = not self.isMaximized()
-        if not IS_WINDOWS:
-            self.showMaximized() if will_max else self.showNormal()
-            self._set_max_icon(will_max)
-            return
-        hwnd = self._hwnd()
-        _user32.ShowWindow(hwnd, SW_MAXIMIZE if will_max else SW_RESTORE)
-        self._set_max_icon(will_max)
+        # 只翻转自维护状态，不查 OS：点击行为与图标永远一致。
+        self._maximized = not self._maximized
+        if IS_WINDOWS:
+            hwnd = self._hwnd()
+            _user32.ShowWindow(
+                hwnd, SW_MAXIMIZE if self._maximized else SW_RESTORE
+            )
+        elif self._maximized:
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self._set_max_icon(self._maximized)
+        self._fs_log(f"toggle_maximize -> _maximized={self._maximized}")
 
     def _build_tab_plus(self) -> None:
         """+ 按钮是 top_row 的子控件，动态跟随最后一个标签（带上限）。"""
@@ -744,7 +987,8 @@ class MainWindow(QMainWindow):
             lambda: self._close_tab(self.tabs.currentIndex())
         )
         QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self._focus_url_bar)
-        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._show_find_bar)
+        # Ctrl+F 不再用 QShortcut 抢占：交给注入脚本判断网页是否已处理，
+        # 未处理时经 shortcut_unhandled 信号回到 _show_find_bar（见 new_tab）。
         QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(
             lambda: self._current().view.reload()
         )
@@ -762,10 +1006,10 @@ class MainWindow(QMainWindow):
             lambda: self.new_tab(QUrl("purebrowser://history"))
         )
         QShortcut(QKeySequence("Ctrl+B"), self).activated.connect(
-            lambda: self.bookmarks_btn.showMenu()
+            lambda: self._toggle_dropdown("bookmarks", self.bookmarks_btn)
         )
         QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(
-            lambda: self.download_btn.showMenu()
+            lambda: self._toggle_dropdown("download", self.download_btn)
         )
         QShortcut(QKeySequence("F11"), self).activated.connect(self._toggle_fullscreen)
         QShortcut(QKeySequence("Escape"), self).activated.connect(self._handle_escape)
@@ -791,14 +1035,21 @@ class MainWindow(QMainWindow):
         self.url_bar.selectAll()
 
     # ---------- 全屏时序调试探针（PUREBROWSER_FS_DEBUG=1 开启） ----------
+    def _ensure_state_probe(self) -> None:
+        """连接 windowStateChanged（幂等）。首帧 windowHandle() 可能还没就绪，
+        故 showEvent 与 start() 里都会尝试一次。"""
+        if self._fs_probe_connected:
+            return
+        wh = self.windowHandle()
+        if wh is None:
+            return
+        wh.windowStateChanged.connect(self._on_window_state_changed)
+        self._fs_probe_connected = True
+        self._fs_log("windowStateChanged probe connected")
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if not self._fs_probe_connected:
-            wh = self.windowHandle()
-            if wh is not None:
-                wh.windowStateChanged.connect(self._on_window_state_changed)
-                self._fs_probe_connected = True
-                self._fs_log("windowStateChanged probe connected")
+        self._ensure_state_probe()
 
     def _fs_log(self, msg: str) -> None:
         if not self._fs_debug:
@@ -822,21 +1073,29 @@ class MainWindow(QMainWindow):
             names.append("NoState(Normal)")
         raw = getattr(state, "value", state)
         self._fs_log(f"windowStateChanged -> {'|'.join(names)} (raw={raw})")
-        # 用信号自带的 state 判定（isMaximized() 此时可能仍滞后）——方案 A。
-        try:
-            self._set_max_icon(bool(state & Qt.WindowState.WindowMaximized))
-        except Exception:
-            pass
+        # 本窗口是自绘无边框 + 原生 ShowWindow，Qt 发来的 state 可能是"激活"
+        # 类的过时事件（不带 Maximized），直接据此刷图标会把已最大化的窗口刷回
+        # "最大化"。故延到下一个事件循环，按真实 isMaximized() 对账。
+        QTimer.singleShot(0, self._update_max_icon)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._fs_log(
             f"resizeEvent {event.size().width()}x{event.size().height()}"
         )
+        # 用原生 IsZoomed 判定：最大化时 isMaximized() 会滞后一拍，会把最大化
+        # 几何写进 _last_normal_rect，导致保存出去的"窗口化尺寸"= 工作区尺寸。
+        if not self._is_zoomed() and not self._is_fullscreen:
+            self._last_normal_rect = self.geometry()
         self.tabs.tabBar().update()
         self._relayout_tabs()
         if getattr(self, "_freeze_overlay", None) is not None and self._freeze_overlay.isVisible():
             self._sync_overlay_geometry()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if not self._is_zoomed() and not self._is_fullscreen:
+            self._last_normal_rect = self.geometry()
 
     # ---------- 原生 Win32 全屏控制器 ----------
     def nativeEvent(self, eventType, message):
@@ -856,6 +1115,9 @@ class MainWindow(QMainWindow):
                 if msg.message == WM_ERASEBKGND:
                     return True, 1  # 由 Qt 负责重绘背景，禁止系统擦除
                 if msg.message == WM_ENTERSIZEMOVE:
+                    # 用户开始拖动/调整：窗口必然回到窗口化，同步状态与图标。
+                    self._maximized = False
+                    self._set_max_icon(False)
                     self._freeze_begin()
                     return True, 0
                 if msg.message == WM_EXITSIZEMOVE:
@@ -863,18 +1125,25 @@ class MainWindow(QMainWindow):
                     return True, 0
                 if msg.message == WM_NCHITTEST:
                     return True, self._native_hit_test(msg)
-                if msg.message == WM_NCLBUTTONDOWN and msg.wParam == HTMAXBUTTON:
-                    # Win11：命中最大化键（Snap 弹层用的 HTMAXBUTTON）时点击处理。
-                    self._toggle_maximize()
-                    return True, 0
         except Exception:
             pass
         return False, 0
 
     def _adjust_maximized_client(self, msg) -> None:
-        """最大化时把客户区对齐 monitor 工作区，消除系统 resize 边框对
-        标签栏顶部 / 状态栏底部的 11px 遮挡（SM_CXSIZEFRAME+CXPADDEDBORDER）。"""
-        if not IS_WINDOWS or not _user32.IsZoomed(msg.hWnd):
+        """把客户区对齐正确的矩形。
+
+        - 全屏：对齐整个显示器（rcMonitor）。全屏时窗口仍带 WS_MAXIMIZE，
+          IsZoomed 为真，若按工作区裁就会在底部露出任务栏（浅蓝色边角）。
+        - 最大化（非全屏）：对齐工作区，消除系统 resize 边框对标签栏顶部 /
+          状态栏底部的 11px 遮挡（SM_CXSIZEFRAME+CXPADDEDBORDER）。
+        """
+        if not IS_WINDOWS:
+            return
+        if getattr(self, "_is_fullscreen", False):
+            target = "monitor"
+        elif _user32.IsZoomed(msg.hWnd):
+            target = "work"
+        else:
             return
         mon = _user32.MonitorFromWindow(msg.hWnd, MONITOR_DEFAULTTONEAREST)
         if not mon:
@@ -886,11 +1155,11 @@ class MainWindow(QMainWindow):
         params = ctypes.cast(
             ctypes.c_void_p(msg.lParam), ctypes.POINTER(_NCCALCSIZE_PARAMS)
         ).contents
-        work = info.rcWork
-        params.rgrc[0].left = work.left
-        params.rgrc[0].top = work.top
-        params.rgrc[0].right = work.right
-        params.rgrc[0].bottom = work.bottom
+        rect = info.rcMonitor if target == "monitor" else info.rcWork
+        params.rgrc[0].left = rect.left
+        params.rgrc[0].top = rect.top
+        params.rgrc[0].right = rect.right
+        params.rgrc[0].bottom = rect.bottom
 
     def _poll_caption_hover(self) -> None:
         """轮询光标统一驱动三键 hover（不依赖 Qt enter/leave，规避 HTMAXBUTTON
@@ -983,8 +1252,9 @@ class MainWindow(QMainWindow):
             return HTTOP
         if bottom:
             return HTBOTTOM
-        # 窗口控制键：交给 Qt 处理点击；最大化键在 Win11 返回 HTMAXBUTTON 以触发 Snap。
-        # 只对可见按钮生效。优先级高于下面的 HTCAPTION。
+        # 窗口控制键：交给 Qt 处理点击（全部 HTCLIENT）。
+        # 注意：max 键不再返回 HTMAXBUTTON——那样点击会由 Win11 系统接管，
+        # 我们的状态机拿不到点击。这里让 Qt 按钮收点击，_toggle_maximize 全权控制。
         for btn in (
             getattr(self, "win_min", None),
             getattr(self, "win_max", None),
@@ -994,8 +1264,6 @@ class MainWindow(QMainWindow):
                 continue
             tl = btn.mapTo(self, QPoint(0, 0))
             if QRect(tl, btn.size()).contains(local):
-                if btn is self.win_max and self._snap_supported():
-                    return HTMAXBUTTON
                 return HTCLIENT
         # 顶行空白 → HTCAPTION（可拖动窗口 / 双击最大化）；
         # 可见标签矩形、+ 按钮除外。标签矩形实时计算，不缓存。
@@ -1089,15 +1357,20 @@ class MainWindow(QMainWindow):
             f"enter: SetWindowLongPtrW prev={_fmt_ptr(prev)} new={_fmt_ptr(new_style)}"
         )
 
+        # 先置全屏标志：下面 SetWindowPos 会触发 WM_NCCALCSIZE，
+        # _adjust_maximized_client 必须知道此时是全屏，客户区才会取整块显示器
+        # （否则仍带 WS_MAXIMIZE 会按工作区裁，底部漏出任务栏）。
+        self._is_fullscreen = True
+
         x, y, w, h = self._monitor_rect()
         ok = _user32.SetWindowPos(
-            hwnd, HWND_TOP, x, y, w, h, SWP_FRAMECHANGED | SWP_NOZORDER
+            hwnd, wintypes.HWND(HWND_TOPMOST), x, y, w, h, SWP_FRAMECHANGED
         )
+        _user32.SetForegroundWindow(hwnd)
         self._fs_log(
-            f"enter: monitor=({x},{y},{w},{h}) SetWindowPos ok={bool(ok)}"
+            f"enter: monitor=({x},{y},{w},{h}) SetWindowPos(topmost) ok={bool(ok)}"
         )
 
-        self._is_fullscreen = True
         self._hide_chrome()
         self._log_qt_state("enter done")
 
@@ -1107,6 +1380,9 @@ class MainWindow(QMainWindow):
             self._is_fullscreen = False
             self._show_chrome()
             return
+
+        # 先清全屏标志：恢复最大化时 NCCALCSIZE 要按工作区对齐（而非整块显示器）。
+        self._is_fullscreen = False
 
         hwnd = self._hwnd()
         if self._saved_style is not None:
@@ -1120,20 +1396,20 @@ class MainWindow(QMainWindow):
                 f"showCmd={self._saved_placement.showCmd}"
             )
 
+        # 取消 topmost，防止退出全屏后还压在其他窗口之上。
         ok = _user32.SetWindowPos(
             hwnd,
-            HWND_TOP,
+            wintypes.HWND(HWND_NOTOPMOST),
             0,
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
         self._fs_log(f"exit: SetWindowPos refresh ok={bool(ok)}")
 
         self._saved_placement = None
         self._saved_style = None
-        self._is_fullscreen = False
         self._show_chrome()
         self._log_qt_state("exit done")
 
@@ -1168,23 +1444,7 @@ class MainWindow(QMainWindow):
         else:
             self.exit_fullscreen()
 
-    # ---------- menus ----------
-    def _on_menu_hovered(self, menu, action) -> None:
-        rows = getattr(menu, "_row_map", {})
-        for row in rows.values():
-            row.set_highlight(False)
-        row = rows.get(action)
-        if row is not None:
-            row.set_highlight(True)
-
-    def _submenu(self, parent_menu, label):
-        sub = parent_menu.addMenu(label)
-        sub._row_map = {}
-        sub.hovered.connect(lambda a, m=sub: self._on_menu_hovered(m, a))
-        sub.installEventFilter(self)
-        self._apply_shadow(sub)
-        return sub
-
+    # ---------- dropdown rows ----------
     def _host_icon(self, host: str):
         if host:
             pixmap = favicons.get(self.conn, host)
@@ -1192,8 +1452,9 @@ class MainWindow(QMainWindow):
                 return pixmap
         return self._globe_icon()
 
-    def _add_menu_row(self, menu, rows, *, title, subtitle="", icon=None, url=None,
-                      kind=None, key=None, buttons=None, path=None, rec=None, retry_url=None):
+    def _make_row(self, *, title, subtitle="", icon=None, url=None, kind=None,
+                  key=None, buttons=None, path=None, rec=None, retry_url=None,
+                  progress=None):
         row = MenuRow(
             self.theme,
             title,
@@ -1202,31 +1463,32 @@ class MainWindow(QMainWindow):
             dim=(url is None),
             buttons=buttons,
             deletable=(buttons is None and kind in ("history", "bookmark")),
+            progress=progress,
         )
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(row)
-        menu.addAction(action)
         row._meta = {"kind": kind, "key": key, "url": url, "path": path,
                      "rec": rec, "retry_url": retry_url}
-        row._action = action
-        row._menu = menu
-        if url is not None:
-            action.triggered.connect(self._on_action_triggered)
+        row.clicked.connect(self._on_row_clicked)
         row.action_requested.connect(self._on_row_action)
-        rows[action] = row
-        return action
+        return row
 
-    def _on_action_triggered(self) -> None:
-        """行被左键触发：Ctrl/中键（由菜单事件过滤器记录）→ 新标签，否则当前标签。"""
-        action = self.sender()
-        menu = action.parent() if action is not None else None
-        row = getattr(menu, "_row_map", {}).get(action) if menu is not None else None
-        if row is None:
-            return
-        url = (getattr(row, "_meta", None) or {}).get("url")
+    def _empty_row(self, icon_name: str, title: str, hint: str):
+        return MenuRow(
+            self.theme,
+            title,
+            subtitle=hint,
+            icon=icons.icon(icon_name, self.theme.subtext, 20),
+            dim=True,
+        )
+
+    def _on_row_clicked(self, row, new_tab: bool) -> None:
+        meta = getattr(row, "_meta", None) or {}
+        url = meta.get("url")
         if not url:
             return
-        if getattr(menu, "_last_new_tab", False):
+        panel = self._dropdowns.get(meta.get("kind"))
+        if panel is not None:
+            panel.hide()
+        if new_tab:
             self.new_tab(QUrl(url))
         else:
             self._open_in_current_tab(url)
@@ -1241,22 +1503,9 @@ class MainWindow(QMainWindow):
             return
         page.download(QUrl(url))
 
-    def _remove_menu_row(self, menu, action) -> None:
-        if menu is None or action is None:
-            return
-        rows = getattr(menu, "_row_map", {})
-        row = rows.pop(action, None)
-        menu.removeAction(action)
-        action.deleteLater()
-        if row is not None:
-            row.deleteLater()
-        menu.update()
-
     def _on_row_action(self, row, action_id: str) -> None:
-        """菜单行右侧按钮：删除/移除、下载控制（暂停/继续/取消/打开/目录）。"""
+        """行右侧按钮：删除/移除、下载控制（暂停/继续/取消/打开/目录）。"""
         meta = getattr(row, "_meta", None) or {}
-        menu = getattr(row, "_menu", None)
-        action = getattr(row, "_action", None)
         kind = meta.get("kind")
         if action_id in ("delete", "remove"):
             if kind == "history":
@@ -1270,11 +1519,12 @@ class MainWindow(QMainWindow):
                     self.downloads.remove(rec)
                 elif meta.get("key") is not None:
                     downloads_store.remove(self.conn, meta.get("key"))
-            self._remove_menu_row(menu, action)
+            self._refresh_dropdown(kind)
             return
         path = meta.get("path") or ""
         if action_id == "refresh":
             self._retry_download(meta.get("retry_url"))
+            self._refresh_dropdown(kind)
             return
         if action_id == "open":
             self.downloads.open_file(path)
@@ -1293,7 +1543,18 @@ class MainWindow(QMainWindow):
             self.downloads.cancel(rec)
         else:
             return
-        self._populate_download_menu()
+        self._refresh_dropdown("download")
+
+    def _refresh_dropdown(self, kind: str) -> None:
+        panel = getattr(self, "_dropdowns", {}).get(kind)
+        if panel is None or not panel.isVisible():
+            return
+        if kind == "history":
+            self._fill_history_panel(panel)
+        elif kind == "bookmarks":
+            self._fill_bookmarks_panel(panel)
+        elif kind == "download":
+            self._fill_download_panel(panel)
 
     @staticmethod
     def _human_size(n) -> str:
@@ -1304,45 +1565,57 @@ class MainWindow(QMainWindow):
             n /= 1024.0
         return f"{n:.1f} TB"
 
+    def _human_speed(self, n) -> str:
+        return f"{self._human_size(n)}/s"
+
     def _download_status(self, rec: dict) -> str:
         if rec["canceled"]:
             return "已取消 / 失败"
-        if rec["finished"]:
-            return f"已完成 · {self._human_size(rec['total'])}"
-        received = rec["received"] or 0
         total = rec["total"] or 0
+        received = rec["received"] or 0
+        if rec["finished"]:
+            return f"已完成 · {self._human_size(total)}"
+        if rec.get("is_paused"):
+            if total > 0:
+                return f"已暂停 · {self._human_size(received)} / {self._human_size(total)}"
+            return f"已暂停 · {self._human_size(received)}"
+        speed = rec.get("speed", 0.0) or 0.0
+        parts = []
         if total > 0:
-            return f"{int(received * 100 / total)}% · {self._human_size(received)}/{self._human_size(total)}"
-        return f"下载中 · {self._human_size(received)}"
+            parts.append(f"{int(received * 100 / total)}%")
+        if speed > 0:
+            parts.append(self._human_speed(speed))
+        if total > 0:
+            parts.append(f"{self._human_size(received)} / {self._human_size(total)}")
+        else:
+            parts.append(self._human_size(received))
+        return " · ".join(parts)
 
-    def _add_empty_state(self, menu, icon_name: str, title: str, hint: str) -> None:
-        """统一的空态行：图标 + 主标题 + 引导句（不可点击）。"""
-        row = MenuRow(
-            self.theme,
-            title,
-            subtitle=hint,
-            icon=icons.icon(icon_name, self.theme.subtext, 20),
-            dim=True,
-        )
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(row)
-        action.setEnabled(False)
-        menu.addAction(action)
+    def _context_popup(self) -> ContextMenu:
+        """右键菜单复用一个常驻自绘弹出层。
+
+        非 QMenu：QMenu 永远是 translucent/layered 窗口且悬停重绘昂贵；浮在
+        播放中的视频上会拖累 GUI 线程 + DWM 合成。见 ui/context_menu.py。
+        """
+        popup = getattr(self, "_ctx_popup", None)
+        if popup is None:
+            popup = ContextMenu(self.theme)
+            self._ctx_popup = popup
+        return popup
 
     def _show_context_menu(self, tab, req, pos) -> None:
         """自定义中文右键菜单（按 lastContextMenuRequest 上下文动态构建）。"""
         page = tab.view.page()
         if page is None:
             return
-        menu = QMenu(self)
-        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self._apply_shadow(menu)
+        entries: list = []
 
         def page_action(text, wa):
             act = page.action(wa)
-            item = menu.addAction(text)
-            item.setEnabled(bool(act.isEnabled()) if act is not None else False)
-            item.triggered.connect(lambda checked=False, w=wa: page.triggerAction(w))
+            enabled = bool(act.isEnabled()) if act is not None else False
+            entries.append(
+                menu_action(text, lambda w=wa: page.triggerAction(w), enabled)
+            )
 
         link = req.linkUrl() if req is not None else None
         media = req.mediaUrl() if req is not None else None
@@ -1364,25 +1637,25 @@ class MainWindow(QMainWindow):
         )
 
         if has_link:
-            a = menu.addAction("在新标签打开链接")
-            a.triggered.connect(lambda checked=False, u=link: self.new_tab(u))
-            a = menu.addAction("链接另存为")
-            a.triggered.connect(lambda checked=False, u=link: page.download(u))
-            a = menu.addAction("复制链接地址")
-            a.triggered.connect(
-                lambda checked=False, u=link: QApplication.clipboard().setText(u.toString())
+            entries.append(menu_action("在新标签打开链接", lambda u=link: self.new_tab(u)))
+            entries.append(menu_action("链接另存为", lambda u=link: page.download(u)))
+            entries.append(
+                menu_action(
+                    "复制链接地址",
+                    lambda u=link: QApplication.clipboard().setText(u.toString()),
+                )
             )
-            menu.addSeparator()
+            entries.append(menu_separator())
         if has_image:
-            a = menu.addAction("图片另存为")
-            a.triggered.connect(lambda checked=False, u=media: page.download(u))
-            a = menu.addAction("复制图片地址")
-            a.triggered.connect(
-                lambda checked=False, u=media: QApplication.clipboard().setText(u.toString())
+            entries.append(menu_action("图片另存为", lambda u=media: page.download(u)))
+            entries.append(
+                menu_action(
+                    "复制图片地址",
+                    lambda u=media: QApplication.clipboard().setText(u.toString()),
+                )
             )
-            a = menu.addAction("在新标签打开图片")
-            a.triggered.connect(lambda checked=False, u=media: self.new_tab(u))
-            menu.addSeparator()
+            entries.append(menu_action("在新标签打开图片", lambda u=media: self.new_tab(u)))
+            entries.append(menu_separator())
         if editable:
             Edit = QWebEngineContextMenuRequest.EditFlag
             for text, flag, wa in (
@@ -1395,11 +1668,13 @@ class MainWindow(QMainWindow):
             ):
                 if flags & flag:
                     page_action(text, wa)
-            menu.addSeparator()
+            entries.append(menu_separator())
         elif selected:
-            a = menu.addAction("复制")
-            a.triggered.connect(
-                lambda checked=False: page.triggerAction(QWebEnginePage.WebAction.Copy)
+            entries.append(
+                menu_action(
+                    "复制",
+                    lambda: page.triggerAction(QWebEnginePage.WebAction.Copy),
+                )
             )
             engine = self.settings.get("search_engine", "bing")
             template = SEARCH_ENGINES.get(engine, SEARCH_ENGINES["bing"])
@@ -1408,111 +1683,104 @@ class MainWindow(QMainWindow):
                 "duckduckgo": "DuckDuckGo", "google": "Google",
             }.get(engine, engine)
             label = selected if len(selected) <= 20 else selected[:20] + "\u2026"
-            a = menu.addAction(f"用 {engine_label} 搜索\u201c{label}\u201d")
-            a.triggered.connect(
-                lambda checked=False, u=template.format(q=quote_plus(selected)): self.new_tab(QUrl(u))
+            url = template.format(q=quote_plus(selected))
+            entries.append(
+                menu_action(
+                    f"用 {engine_label} 搜索\u201c{label}\u201d",
+                    lambda u=url: self.new_tab(QUrl(u)),
+                )
             )
-            menu.addSeparator()
+            entries.append(menu_separator())
 
         page_action("后退", QWebEnginePage.WebAction.Back)
         page_action("前进", QWebEnginePage.WebAction.Forward)
         page_action("刷新", QWebEnginePage.WebAction.Reload)
-        menu.popup(pos)
 
-    def _populate_history_menu(self) -> None:
-        self.history_menu.clear()
-        rows_map: dict = {}
-        self.history_menu._row_map = rows_map
+        popup = self._context_popup()
+        popup.set_entries(entries)
+        popup.popup(pos)
+
+    def _fill_history_panel(self, panel: DropdownPanel) -> None:
+        panel.set_header(
+            "历史记录", "查看全部",
+            lambda: self.new_tab(QUrl("purebrowser://history")),
+        )
         rows = history.recent(self.conn, limit=150)
         if not rows:
-            self._add_empty_state(
-                self.history_menu, "clock", "暂无历史记录", "浏览过的网页会出现在这里"
-            )
-        else:
-            today = date.today()
-            groups = {"今天": [], "昨天": [], "更早": []}
-            for r in rows:
-                visited = date.fromtimestamp(r["visited_at"])
-                if visited == today:
-                    groups["今天"].append(r)
-                elif visited == today - timedelta(days=1):
-                    groups["昨天"].append(r)
-                else:
-                    groups["更早"].append(r)
-            cap = 40
-            for label in ("今天", "昨天", "更早"):
-                items = groups[label]
-                if not items:
-                    continue
-                sub = self._submenu(self.history_menu, label)
-                sub_map = sub._row_map
-                for r in items[:cap]:
-                    url = r["url"]
-                    host = r["host"] or (urlparse(url).hostname or "")
-                    self._add_menu_row(
-                        sub,
-                        sub_map,
-                        title=r["title"] or url,
-                        subtitle=host or url,
-                        icon=self._host_icon(host),
-                        url=url,
-                        kind="history",
-                        key=r["id"],
-                    )
-        self.history_menu.addSeparator()
-        view_all = self.history_menu.addAction("查看全部历史记录")
-        view_all.triggered.connect(lambda: self.new_tab(QUrl("purebrowser://history")))
-
-    def _populate_bookmarks_menu(self) -> None:
-        self.bookmarks_menu.clear()
-        rows_map: dict = {}
-        self.bookmarks_menu._row_map = rows_map
-        rows = bookmarks.list_all(self.conn)
-        if not rows:
-            self._add_empty_state(
-                self.bookmarks_menu, "bookmark", "暂无书签", "点击地址栏星标即可收藏"
+            panel.set_sections(
+                [(None, [self._empty_row("clock", "暂无历史记录",
+                                         "浏览过的网页会出现在这里")])]
             )
             return
+        today = date.today()
+        groups = {"今天": [], "昨天": [], "更早": []}
+        for r in rows:
+            visited = date.fromtimestamp(r["visited_at"])
+            if visited == today:
+                groups["今天"].append(r)
+            elif visited == today - timedelta(days=1):
+                groups["昨天"].append(r)
+            else:
+                groups["更早"].append(r)
+        sections = []
+        for label in ("今天", "昨天", "更早"):
+            items = groups[label][:40]
+            if not items:
+                continue
+            widgets = []
+            for r in items:
+                url = r["url"]
+                host = r["host"] or (urlparse(url).hostname or "")
+                widgets.append(self._make_row(
+                    title=r["title"] or url,
+                    subtitle=host or url,
+                    icon=self._host_icon(host),
+                    url=url, kind="history", key=r["id"],
+                ))
+            sections.append((label, widgets))
+        panel.set_sections(sections)
+
+    def _fill_bookmarks_panel(self, panel: DropdownPanel) -> None:
+        panel.set_header("书签", "清空", self._clear_bookmarks)
+        rows = bookmarks.list_all(self.conn)
+        if not rows:
+            panel.set_sections(
+                [(None, [self._empty_row("bookmark", "暂无书签",
+                                         "点击地址栏星标即可收藏")])]
+            )
+            return
+        widgets = []
         for r in rows:
             url = r["url"]
             host = urlparse(url).hostname or ""
-            self._add_menu_row(
-                self.bookmarks_menu,
-                rows_map,
+            widgets.append(self._make_row(
                 title=r["title"] or url,
                 subtitle=host or url,
                 icon=self._host_icon(host),
-                url=url,
-                kind="bookmark",
-                key=url,
-            )
-        self.bookmarks_menu.addSeparator()
-        clear_all = self.bookmarks_menu.addAction("清空所有书签")
-        clear_all.triggered.connect(self._clear_bookmarks)
+                url=url, kind="bookmark", key=url,
+            ))
+        panel.set_sections([(None, widgets)])
 
-    def _populate_download_menu(self) -> None:
-        self.download_menu.clear()
-        rows_map: dict = {}
-        self.download_menu._row_map = rows_map
-        open_folder = self.download_menu.addAction("打开下载文件夹")
-        open_folder.triggered.connect(self.downloads.open_folder)
+    def _fill_download_panel(self, panel: DropdownPanel) -> None:
+        panel.set_header("下载", "打开文件夹", self.downloads.open_folder)
 
         live = list(self.downloads.records)
         live_ids = {r.get("db_id") for r in live if r.get("db_id") is not None}
-        history = [row for row in downloads_store.list_recent(self.conn, 200)
-                   if row["id"] not in live_ids]
+        hist = [row for row in downloads_store.list_recent(self.conn, 200)
+                if row["id"] not in live_ids]
 
         entries = [(r.get("created_at", 0), r, None) for r in live]
-        entries += [(h["created_at"], None, h) for h in history]
+        entries += [(h["created_at"], None, h) for h in hist]
         entries.sort(key=lambda e: e[0], reverse=True)
 
         if not entries:
-            self.download_menu.addSeparator()
-            self._add_empty_state(
-                self.download_menu, "download", "暂无下载", "下载的文件会显示在这里"
+            panel.set_sections(
+                [(None, [self._empty_row("download", "暂无下载",
+                                         "下载的文件会显示在这里")])]
             )
+            panel._download_rows = {}
+            panel._active_ids = set()
             return
-        self.download_menu.addSeparator()
 
         groups = {"进行中": [], "已完成": [], "失败": []}
         for _created, rec, h in entries:
@@ -1531,6 +1799,9 @@ class MainWindow(QMainWindow):
                 else:
                     groups["进行中"].append((rec, h))
 
+        sections = []
+        dl_rows: dict = {}
+        active_ids: set = set()
         for label, items, icon_name in (
             ("进行中", groups["进行中"], "download"),
             ("已完成", groups["已完成"], "file"),
@@ -1538,22 +1809,23 @@ class MainWindow(QMainWindow):
         ):
             if not items:
                 continue
-            sub = self._submenu(self.download_menu, label)
-            sub_map = sub._row_map
+            widgets = []
             for rec, h in items:
                 if rec is not None:
-                    self._add_menu_row(
-                        sub, sub_map,
+                    row = self._make_row(
                         title=rec["filename"],
                         subtitle=self._download_status(rec),
                         icon=icons.icon(icon_name, self.theme.subtext, 20),
                         kind="download", key=rec.get("db_id"),
                         buttons=self._download_buttons(rec),
                         path=rec["path"], rec=rec, retry_url=rec.get("url"),
+                        progress=self._percent(rec) if not rec["finished"] else None,
                     )
+                    if not rec["finished"]:
+                        dl_rows[rec.get("db_id")] = row
+                        active_ids.add(rec.get("db_id"))
                 else:
-                    self._add_menu_row(
-                        sub, sub_map,
+                    row = self._make_row(
                         title=h["filename"] or h["path"],
                         subtitle=self._history_status(h),
                         icon=icons.icon(icon_name, self.theme.subtext, 20),
@@ -1561,6 +1833,29 @@ class MainWindow(QMainWindow):
                         buttons=self._history_buttons(h),
                         path=h["path"], rec=None, retry_url=h["url"],
                     )
+                widgets.append(row)
+            sections.append((label, widgets))
+        panel.set_sections(sections)
+        panel._download_rows = dl_rows
+        panel._active_ids = active_ids
+
+    def _update_download_panel(self) -> None:
+        """下载面板可见时每 200ms 原地刷新进度/速度/体积。"""
+        panel = self._dropdowns.get("download")
+        if panel is None or not panel.isVisible():
+            self._dl_live_timer.stop()
+            return
+        active = [r for r in self.downloads.records if not r["finished"]]
+        current_ids = {r.get("db_id") for r in active}
+        if current_ids != getattr(panel, "_active_ids", set()):
+            self._fill_download_panel(panel)
+            return
+        rows = getattr(panel, "_download_rows", {})
+        for rec in active:
+            row = rows.get(rec.get("db_id"))
+            if row is not None:
+                row.set_progress(self._percent(rec))
+                row.set_subtitle(self._download_status(rec))
 
     def _download_buttons(self, rec: dict) -> list:
         color = self.theme.subtext
@@ -1624,40 +1919,15 @@ class MainWindow(QMainWindow):
             return int(received * 100 / total)
         return 0
 
-    def _on_downloads_changed(self) -> None:
-        active = [r for r in self.downloads.records if not r["finished"]]
-        if active:
-            newest = max(active, key=lambda r: r.get("created_at", 0))
-            if len(active) == 1:
-                title = newest["filename"]
-            else:
-                title = f"{len(active)} 个下载中 · 最新：{newest['filename']}"
-            self.download_toast.set_content(title, self._percent(newest), f"{self._percent(newest)}%")
-            self.download_toast.show_briefly(3000)
-        elif self.downloads.records:
-            rec = max(self.downloads.records, key=lambda r: r.get("created_at", 0))
-            state_text = rec.get("state_text", "")
-            if rec["canceled"]:
-                label = {"interrupted": "已中断", "cancelled": "已取消"}.get(state_text, "失败")
-            else:
-                label = "已完成"
-            percent = 100 if not rec["canceled"] else self._percent(rec)
-            self.download_toast.set_content(rec["filename"], percent, label)
-            self.download_toast.show_briefly(1500)
-        else:
-            self.download_toast.hide()
-
-    def _open_download_menu_from_toast(self) -> None:
-        # 在 toast 上方弹出下载菜单（不依赖工具栏按钮，避免 popup 被 release 关闭）。
-        top_left = self.download_toast.mapToGlobal(QPoint(0, 0))
-        self.download_toast.hide()
-        hint = self.download_menu.sizeHint()
-        self.download_menu.popup(QPoint(top_left.x(), max(0, top_left.y() - hint.height())))
-
     def _refresh_download_button(self) -> None:
         n = self.downloads.active_count()
         self.download_btn.setIcon(icons.icon("download", self.theme.text))
-        self.download_btn.setText(f" {n}" if n else "")
+        if n > 0:
+            self.dl_badge.setText(str(n) if n < 100 else "99+")
+            self.dl_badge.setVisible(True)
+            self._position_download_badge()
+        else:
+            self.dl_badge.setVisible(False)
 
     def _open_in_current_tab(self, url: str) -> None:
         self._current().load(QUrl(url))
@@ -1683,6 +1953,9 @@ class MainWindow(QMainWindow):
         tab.new_page_requested.connect(self._on_new_page_requested)
         tab.fullscreen_toggled.connect(self._on_fullscreen_toggled)
         tab.view.page().findTextFinished.connect(self._on_find_result)
+        tab.view.page().shortcut_unhandled.connect(
+            lambda action, t=tab: self._on_shortcut_unhandled(t, action)
+        )
         tab.load_finished.connect(
             lambda _ok=False, t=tab: self._apply_site_zoom(t.view, t.view.url())
         )
@@ -1734,6 +2007,9 @@ class MainWindow(QMainWindow):
             self._session_timer.start()
 
     def _save_session(self) -> None:
+        # 恢复提示未决时不写盘，避免把上次会话覆盖成占位 newtab。
+        if getattr(self, "_pending_restore", None) is not None:
+            return
         try:
             tabs = []
             for i in range(self.tabs.count()):
@@ -1741,35 +2017,16 @@ class MainWindow(QMainWindow):
                 if isinstance(w, Tab):
                     tabs.append({"url": self._tab_urls.get(w, ""),
                                  "title": self._tab_full_titles.get(w, "")})
-            session.save(self.data_dir, {"tabs": tabs, "active": self.tabs.currentIndex()})
+            ng = self._last_normal_rect or self.normalGeometry()
+            window = {
+                "maximized": bool(self._is_zoomed()),
+                "x": ng.x(), "y": ng.y(), "w": ng.width(), "h": ng.height(),
+            }
+            session.save(self.data_dir, {
+                "tabs": tabs, "active": self.tabs.currentIndex(), "window": window,
+            })
         except Exception:
             pass
-
-    def _restore_session(self) -> None:
-        """启动恢复：跳过 newtab；无有效标签则只开一个 newtab。"""
-        if self.settings.get("restore_session", True):
-            data = session.load(self.data_dir)
-        else:
-            data = {"tabs": []}
-        kept = []
-        for i, t in enumerate(data.get("tabs", []) or []):
-            url = (t.get("url") or "").strip()
-            if not url or url.startswith("purebrowser://newtab"):
-                continue
-            kept.append((i, url))
-        if not kept:
-            self.new_tab(NEWTAB_URL)
-            return
-        for _i, url in kept:
-            self.new_tab(QUrl(url))
-        active = data.get("active", -1)
-        target = len(kept) - 1
-        for pos, (orig, _u) in enumerate(kept):
-            if orig == active:
-                target = pos
-                break
-        idx = max(0, min(int(target), self.tabs.count() - 1))
-        self.tabs.setCurrentIndex(idx)
 
     def _reopen_closed_tab(self) -> None:
         while self._closed_tabs:

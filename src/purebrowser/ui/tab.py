@@ -8,6 +8,10 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
 DEFAULT_SEARCH = "https://cn.bing.com/search?q={q}"
 
+# 页面把 Ctrl+F 交给浏览器的报信暗号。注入脚本只在网页自身未处理
+# （未 preventDefault）时打印它；PurePage 拦截 console 后转成信号。
+FIND_SENTINEL = "__PB_FIND__"
+
 
 def to_url(text: str, search_template: str = DEFAULT_SEARCH) -> QUrl:
     text = text.strip()
@@ -25,6 +29,8 @@ def to_url(text: str, search_template: str = DEFAULT_SEARCH) -> QUrl:
 class PurePage(QWebEnginePage):
     new_page_requested = pyqtSignal(QWebEnginePage)
     fullscreen_toggled = pyqtSignal(bool)
+    # 网页未处理 Ctrl+F 时发出（由注入脚本 → console 暗号转译）。
+    shortcut_unhandled = pyqtSignal(str)
 
     def __init__(self, profile: QWebEngineProfile, parent=None):
         super().__init__(profile, parent)
@@ -35,6 +41,13 @@ class PurePage(QWebEnginePage):
         page = PurePage(self.profile())
         self.new_page_requested.emit(page)
         return page
+
+    def javaScriptConsoleMessage(self, level, message, line_number, source_id):
+        # 只认暗号；其余 console 输出吞掉（默认实现也是静默）。
+        if message == FIND_SENTINEL:
+            self.shortcut_unhandled.emit("find")
+            return
+        super().javaScriptConsoleMessage(level, message, line_number, source_id)
 
     def _deny(self, origin, feature):
         self.setFeaturePermission(
