@@ -1,68 +1,70 @@
-# PureBrowser
+<p align="center">
+  <img src="docs/assets/purebrowser.png" width="128" alt="PureBrowser logo">
+</p>
 
-> A Python-hackable, privacy-first browser with **H.264 built in**.
-> 一个用 Python 就能改的、自带 H.264 的隐私浏览器。
+<h1 align="center">PureBrowser</h1>
 
-[![License](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg)]()
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)]()
+<p align="center"><b>A Python-hackable, privacy-first browser with H.264 built in.</b></p>
 
----
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">中文</a>
+</p>
 
-## 这是什么
-
-PureBrowser 是一个基于 **PyQt6 + 自编译 QtWebEngine** 的桌面浏览器。它解决了一个生态级的痛点：
-
-> **Qt 官方 pip wheel 不带 H.264 解码器，导致 B 站、腾讯视频等网站报"当前浏览器不支持 HTML5 播放器"。**
-
-本项目从源码编译 QtWebEngine 6.7.3，启用 `-webengine-proprietary-codecs`，让 Python 也能拥有一个能播视频的浏览器。整个编译过程和所有 patch 记录在 [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md)。
-
-## 三个核心差异点
-
-### 1. 自带 H.264（这最难）
-
-- 自编译 Qt 6.7.3 + QtWebEngine，显式开启 proprietary codecs
-- 手改 `environment.x64`、`toolchain.ninja`、`build.ninja`，切换 v142/v143 编译器，绕过 MSVC 回归 bug
-- 完整可复现步骤在 `docs/BUILD_NOTES.md`
-- 结果：B 站视频直接播，画面声音正常
-
-### 2. 纯 Python 可开发
-
-- 技术栈：Python 3.10 + PyQt6 6.7.1 + QtWebEngine 6.7.3
-- 所有 UI、隐私策略、拦截规则都在 `src/purebrowser/` 下的 Python 文件里
-- 改一行 py 文件就有效果，不需要重编 C++
-- 对比 ungoogled-chromium / LibreWolf：那些是 C++ 项目
-
-### 3. 隐私优先 + 可审计
-
-- 无遥测、无崩溃上传、无 RLZ、无设备 ID
-- 默认 HTTPS-only
-- 默认 DoH（阿里 DNS，国内可达）
-- 默认阻止第三方 Cookie
-- 内置广告/追踪拦截（EasyList / EasyPrivacy）
-- 所有站点权限默认拒绝（地理位置、通知、摄像头、剪贴板）
-- 新标签页纯本地：无新闻、无推荐、无广告
-- 数据本地 SQLite，无云端同步，无账号系统
-
-**实测证据**：静默 60 秒 + 访问 2 个站点，共 4 个网络请求，3 个远端域名，遥测命中 0。可用 `tools/audit/net_audit.py` 复现。
+<p align="center">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg" alt="Platform">
+  <img src="https://img.shields.io/badge/status-alpha-orange.svg" alt="Status">
+</p>
 
 ---
 
-## 快速开始
+## What is this
 
-### 普通用户
+PureBrowser is a Windows desktop browser built on **PyQt6 + a self-compiled QtWebEngine 6.7.3**.
 
-> 安装包尚未发布。当前状态为 Alpha。
+It exists to solve one ecosystem-level pain point: the official Qt pip wheels ship **without H.264**, so
+sites like Bilibili report "your browser does not support HTML5 playback". PureBrowser compiles
+QtWebEngine from source with `-webengine-proprietary-codecs` so a Python browser can actually play video.
+The whole build and every patch is documented in [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md).
 
-### 开发者：克隆即跑
+The three things that set it apart:
+
+1. **H.264 built in** — self-compiled Qt + QtWebEngine with proprietary codecs enabled. Bilibili plays.
+2. **Hackable in pure Python** — every UI, privacy policy and blocking rule is a `.py` file under
+   `src/purebrowser/`. Change a line, no C++ rebuild.
+3. **Privacy-first and auditable** — no telemetry, no crash upload, no RLZ; HTTPS upgrades; DoH; a
+   built-in ad/tracker blocklist; all site permissions denied by default; local SQLite only.
+
+## System requirements
+
+| Component | Version | Source |
+|---|---|---|
+| OS | Windows 10/11 **x64** | — |
+| Python | **3.10.11** (project venv) | python.org |
+| PyQt6 | 6.7.1 | **self-compiled wheel** (not PyPI) |
+| PyQt6_sip | 13.8.0 | PyPI |
+| PyQt6-WebEngine | 6.7.0 | **self-compiled wheel** (not PyPI) |
+| Qt / QtWebEngine | 6.7.3 + H.264 | **self-compiled**, installed at `D:\develop\Qt6-custom` |
+
+Environment variables (user level): `QT_PLUGIN_PATH` and `PATH` must point into the custom Qt install.
+
+Pure-Python dependencies (declared in `pyproject.toml`): `httpx`, `platformdirs`.
+
+## Quick start
+
+### Normal users
+
+> No public installer yet. Current status: **alpha**.
+
+### Developers: clone and run
 
 ```bash
 git clone https://github.com/<your-name>/purebrowser.git
 cd purebrowser
 ```
 
-**第 1 步：Python 环境**
+**Step 1 — Python environment**
 
 ```cmd
 python -m venv .venv
@@ -70,13 +72,15 @@ python -m venv .venv
 pip install -e .
 ```
 
-**第 2 步：装自编译的 PyQt6（不用自己编）**
+`pip install -e .` installs only `httpx` and `platformdirs`; it never touches Qt.
 
-从 [Releases](https://github.com/<your-name>/purebrowser/releases) 下载三个文件：
+**Step 2 — install the self-compiled PyQt6**
+
+Download from [Releases](https://github.com/<your-name>/purebrowser/releases):
 
 - `PyQt6-6.7.1-cp38-abi3-win_amd64.whl`
 - `PyQt6_WebEngine-6.7.0-cp38-abi3-win_amd64.whl`
-- `Qt6-custom.zip`（约 500 MB）
+- `Qt6-custom.zip` (~500 MB)
 
 ```cmd
 pip uninstall PyQt6 PyQt6-Qt6 PyQt6-WebEngine PyQt6-WebEngine-Qt6 PyQt6_sip -y
@@ -86,11 +90,11 @@ pip install PyQt6_sip==13.8.0 --no-deps
 pip install PyQt6_WebEngine-6.7.0-cp38-abi3-win_amd64.whl --no-deps
 ```
 
-> **关键**：不要装 `PyQt6-Qt6` 和 `PyQt6-WebEngine-Qt6`，那两个 pip 包会覆盖自编译 Qt。
+> **Important:** never install `PyQt6-Qt6` or `PyQt6-WebEngine-Qt6`. They overwrite the self-compiled Qt.
 
-**第 3 步：部署自编译 Qt**
+**Step 3 — deploy the self-compiled Qt**
 
-把 `Qt6-custom.zip` 解压到 `D:\develop\Qt6-custom`，然后设置用户级环境变量：
+Unzip `Qt6-custom.zip` to `D:\develop\Qt6-custom`, then set the user environment variables:
 
 ```powershell
 $p = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -98,152 +102,231 @@ $p = [Environment]::GetEnvironmentVariable("Path", "User")
 [Environment]::SetEnvironmentVariable("QT_PLUGIN_PATH", "D:\develop\Qt6-custom\plugins", "User")
 ```
 
-**关掉所有终端重开**，让环境变量生效。
+Restart all terminals so the variables take effect.
 
-**第 4 步：运行**
+**Step 4 — run**
 
 ```cmd
 python -m purebrowser
 ```
 
-### 内核维护者：从零自编译
+### Kernel maintainers: build QtWebEngine from scratch
 
-见 [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md)。预计 2~5 天，会踩很多坑，但文档记录了每一个。
+See [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md). Expect 2–5 days and many pitfalls; every one is recorded.
 
----
+## Packaging (Windows)
 
-## 架构
+Packaging is **PyInstaller + Inno Setup**:
+
+| File | Role |
+|---|---|
+| `PureBrowser.spec` | PyInstaller recipe: bundles the custom Qt6 DLLs/plugins/resources and `QtWebEngineProcess.exe`, entry `src/purebrowser/__main__.py`. |
+| `runtime_hook.py` | Sets the runtime paths (`QT_PLUGIN_PATH`, `QT_QPA_PLATFORM_PLUGIN_PATH`, `QTWEBENGINEPROCESS_PATH`, `QTWEBENGINE_RESOURCES_PATH`, `QTWEBENGINE_LOCALES_PATH`). |
+| `rebuild.bat` | One-shot: kill running instances → `pyinstaller PureBrowser.spec --noconfirm` → Inno Setup `ISCC PureBrowser.iss`. |
+| `PureBrowser.iss` | Inno Setup script; output `installer\Output\PureBrowserSetup.exe`. |
+
+```cmd
+rebuild.bat
+```
+
+Outputs: `dist\PureBrowser\` (portable) and `installer\Output\PureBrowserSetup.exe` (installer).
+
+> **Portability warning:** `PureBrowser.spec`, `rebuild.bat` and `PureBrowser.iss` contain **hard-coded
+> absolute paths** for this machine (`D:\PythonProject\purebrowser`, `D:\develop\Qt6-custom`, the Inno Setup
+> install path). Edit them before building on another machine.
+
+Building Qt itself from source is a separate, much larger effort — see
+[`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md).
+
+## Project structure
 
 ```
 purebrowser/
-├─ src/purebrowser/          # 全部 Python 代码
-│  ├─ main.py                # 入口，注入 Chromium flags
-│  ├─ app.py                 # QApplication，scheme 注册
-│  ├─ __main__.py            # python -m purebrowser 入口
-│  ├─ ui/                    # UI 层
-│  │  ├─ window.py           # 主窗口、标签、菜单、快捷键
-│  │  ├─ tab.py              # 单标签封装（含 createWindow）
-│  │  └─ urlbar.py           # 地址栏 + 补全
-│  ├─ core/                  # 核心层
-│  │  ├─ profile.py          # 隐私 profile
-│  │  ├─ interceptor.py      # 请求拦截器
-│  │  ├─ settings.py         # 配置
-│  │  ├─ locations.py        # 数据/缓存路径
-│  │  └─ privacy/flags.py    # Chromium 命令行参数
-│  ├─ data/                  # 数据层
-│  │  ├─ storage.py          # SQLite 连接
-│  │  ├─ history.py          # 历史
-│  │  └─ bookmarks.py        # 书签
-│  └─ pages/                 # 页面层
-│     ├─ pages.py            # purebrowser:// 本地页处理
-│     ├─ downloads.py        # 下载管理
-│     └─ newtab.py           # 新标签页
-├─ tools/
-│  ├─ audit/net_audit.py     # 网络审计
-│  └─ rules/                 # EasyList 编译
-├─ resources/                # 图标、newtab.html
-├─ docs/
-│  └─ BUILD_NOTES.md         # 自编译 QtWebEngine 完整记录
-├─ pyproject.toml
-├─ requirements.txt
-└─ README.md
+├─ src/purebrowser/
+│  ├─ __main__.py / main.py / app.py     # entry, Chromium flags, QApplication + scheme registration
+│  ├─ core/
+│  │  ├─ profile.py                      # QWebEngineProfile: UA, cookies, settings  (frozen)
+│  │  ├─ interceptor.py                  # request interceptor: blocklist, HTTPS, cookie strip (frozen)
+│  │  ├─ privacy/flags.py                # Chromium command-line flags               (frozen)
+│  │  ├─ settings.py                     # settings.json read/write
+│  │  └─ locations.py                    # data/cache/download paths
+│  ├─ data/                              # storage.py history.py bookmarks.py
+│  │                                     # favicons.py downloads_store.py session.py
+│  ├─ pages/
+│  │  ├─ pages.py                        # purebrowser:// handler + history/settings pages
+│  │  ├─ newtab.py                       # new tab URL helpers
+│  │  └─ downloads.py                    # DownloadManager
+│  └─ ui/
+│     ├─ window.py                       # main window, tabs, menus, shortcuts, fullscreen
+│     ├─ tab.py / tab_area.py / tabbar.py# tab widgets + adaptive tab strip
+│     ├─ urlbar.py                       # address bar + autocomplete
+│     ├─ theme.py / icons.py             # theme tokens + inline SVG icons
+│     ├─ hud.py                          # zoom/find HUDs, Ctrl+wheel filter
+│     ├─ menu_rows.py / context_menu.py  # shared rich row + custom right-click menu
+│     ├─ dropdown.py                     # scrollable history/bookmarks/downloads panels
+│     ├─ session_prompt.py               # "restore session?" card
+│     └─ freeze_overlay.py               # resize/move freeze frame
+├─ resources/                            # newtab.html, purebrowser.ico
+├─ tools/                                # smoke_test, e2e_test, regression_test,
+│                                        # fullscreen_harness_test, fullscreen_test, audit/net_audit.py
+├─ docs/                                 # BUILD_NOTES.md, assets/ (logo + screenshots)
+├─ PureBrowser.spec / runtime_hook.py / rebuild.bat / PureBrowser.iss
+├─ pyproject.toml / requirements.txt
+└─ LICENSE / README.md / README.zh-CN.md / AGENTS.md
 ```
 
-## 与主流方案对比
+## Features
 
-| 特性 | **PureBrowser** | ungoogled-chromium | qutebrowser | LibreWolf |
+**Browsing & tabs**
+- Tabbed browsing with an adaptive (sliding) tab strip, drag-to-reorder, per-tab close buttons, `+` button.
+- Reopen the last closed tab (`Ctrl+Shift+T`).
+- Back / forward / reload; `Alt+←/→`, `F5`, `Ctrl+R`.
+
+**Window**
+- Custom-drawn title bar (frameless) with native minimize/maximize/restore.
+- Remembers maximized vs. windowed and the windowed size/position; on launch asks whether to restore
+  the previous session.
+
+**Find & zoom**
+- `Ctrl+F` find bar with match count, next/previous, `Esc` to close. Pages that implement their own
+  `Ctrl+F` take priority; the browser only steps in when the page doesn't handle it.
+- Page zoom via `Ctrl`+wheel and `Ctrl` `+` / `-` / `0`, with a zoom HUD; per-site zoom is remembered.
+
+**Bookmarks & history**
+- `Ctrl+D` to toggle a bookmark; star icon in the toolbar; bookmarks dropdown panel.
+- History in SQLite, autocompleted in the address bar, grouped dropdown (Today / Yesterday / Earlier),
+  and a `purebrowser://history` page.
+
+**Downloads**
+- Pause / resume / cancel / retry; records persisted to SQLite (pruned to 200).
+- Live speed / current size / progress bar in the downloads dropdown panel, plus a red count badge on
+  the toolbar download button. Open file / reveal in folder.
+
+**Menus**
+- Custom Chinese right-click menu (link save-as / copy link, image save / copy, edit actions,
+  copy/search selection, back/forward/reload).
+- History / bookmarks / downloads use a scrollable, themed dropdown panel.
+
+**Appearance**
+- Light / dark / system theme, applied consistently across the toolbar, menus and built-in pages.
+
+**Privacy**
+- Built-in ad/tracker host blocklist (~22 domains, hard-coded), toggleable in settings.
+- HTTP → HTTPS upgrade for requests.
+- Cross-site Cookie header stripped on XHR/media requests, plus partitioned cookies
+  (`PartitionedCookies`, `ThirdPartyStoragePartitioning`).
+- DNS over HTTPS (AliDNS, reachable from mainland China).
+- No telemetry, crash upload, RLZ or device IDs; all site permission requests denied by default;
+  pages can't pop up windows or read the clipboard.
+- Persistent cookies allowed (so logins survive restarts), local SQLite only — no cloud, no account.
+
+**Local pages & tools**
+- `purebrowser://newtab`, `purebrowser://history`, `purebrowser://settings`.
+- Settings: theme, ad-block toggle, DoH toggle, restore-session toggle, search engine,
+  data/download/cache directories, clear cache / clear history.
+- Configurable data directory (`location.txt`).
+- Network audit: set `PUREBROWSER_NETLOG` to a path, then run `tools/audit/net_audit.py`.
+
+**Codecs**
+- H.264 via the self-compiled QtWebEngine (the headline feature).
+
+## Comparison with mainstream
+
+| | **PureBrowser** | ungoogled-chromium | qutebrowser | LibreWolf |
 |---|---|---|---|---|
-| 开发语言 | **Python** | C++ | Python | C++ |
-| 自带 H.264 | **是** | 需自行处理 | 否 | 是 |
-| 自编译内核 | 是 | 是 | 否 | 是 |
-| 无遥测 | 是 | 是 | 是 | 是 |
-| 改一改就跑 | 改 py | 重编几小时 | 改 py | 改 C++ |
-| 项目定位 | 学习 / 定制 / 研究 | 硬核用户 | 键盘党 | 隐私用户 |
+| Language | **Python** | C++ | Python | C++ |
+| H.264 included | **Yes** | DIY | No | Yes |
+| Self-compiled engine | Yes | Yes | No | Yes |
+| No telemetry | Yes | Yes | Yes | Yes |
+| "Edit and run" | edit `.py` | rebuild hours | edit `.py` | edit C++ |
+| Target | learn / customize / research | hardcore users | keyboard users | privacy users |
 
-## 已实现的功能
+## Screenshots
 
-- 标签页、地址栏、前进后退
-- 历史记录（SQLite，地址栏自动补全）
-- 书签（工具栏下拉）
-- 下载管理（进度条、自动去重命名）
-- 快捷键：`Ctrl+T/W/L/R/D/H/B/J`、`Alt+←/→`
-- 内置广告/追踪拦截
-- HTTPS-only
-- DoH（阿里 DNS）
-- 第三方 Cookie 阻止
-- 站点权限默认全拒
-- `purebrowser://history` / `purebrowser://settings` 本地页
-- 可配置数据目录、下载目录、缓存目录
-- 网络审计日志（`PUREBROWSER_NETLOG` 环境变量开启）
+> Placeholder paths — drop the PNGs into `docs/assets/screenshots/` and they appear here.
+
+| Main (light) | Main (dark) |
+|---|---|
+| ![main light](docs/assets/screenshots/main-light.png) | ![main dark](docs/assets/screenshots/main-dark.png) |
+
+| History panel | Downloads panel |
+|---|---|
+| ![history](docs/assets/screenshots/dropdown-history.png) | ![downloads](docs/assets/screenshots/dropdown-downloads.png) |
+
+| Right-click menu | Settings |
+|---|---|
+| ![context menu](docs/assets/screenshots/context-menu.png) | ![settings](docs/assets/screenshots/settings.png) |
 
 ## Roadmap
 
-- [x] 从源码编译 QtWebEngine 6.7.3 + H.264
-- [x] 基础 UI + 拦截器 + 隐私默认策略
-- [x] 历史、书签、下载、设置页
-- [ ] **打包为 Windows 安装包**（Nuitka + Inno Setup）
-- [ ] 自动更新（自建更新服务 + 签名）
-- [ ] Linux / macOS 支持
-- [ ] 扩展系统（可选）
-- [ ] E2EE 同步（可选，默认关闭）
+**Done**
+- [x] Compile QtWebEngine 6.7.3 + H.264 from source
+- [x] Base UI + interceptor + privacy defaults
+- [x] History, bookmarks, downloads, settings page
+- [x] Find bar, page zoom, favicons
+- [x] Custom Chinese menus + scrollable dropdown panels
+- [x] Session-restore prompt + window-state memory
+- [x] Windows packaging (PyInstaller + Inno Setup)
 
-## 常见问题
+**Planned**
+- [ ] Auto-update (self-hosted, signed)
+- [ ] Linux / macOS
+- [ ] Extensions (optional)
+- [ ] E2EE sync (optional, off by default)
+- [ ] Full EasyList rules, bookmarks manager page, private window, per-site permissions
 
-**Q: 为什么下载 PyQt6 要用自编译的，不用 pip 上的？**
+## Known limitations
 
-A: pip 上的 PyQt6 带的 Qt 是官方编译的，**不含 H.264**。自编译的版本才带。两者可以共存，但不要混用同一个 venv。
+- **Windows x64 only.**
+- Ad-blocking is a **small built-in host blocklist (~22 domains)**, not EasyList/EasyPrivacy.
+- No per-site permission grants — every permission request is denied.
+- No extensions, no sync, no accounts, no auto-update, no multi-profile, no private/incognito window.
+- Built-in pages are limited to new tab / history / settings (no standalone bookmarks manager page).
+- **Download resume** only works within the same session; on restart, in-progress downloads are marked
+  interrupted and must be retried (started fresh).
+- Session restore remembers URLs, not full form/scroll state.
 
-**Q: 为什么只支持 Windows？**
+## FAQ
 
-A: 当前版本只在 Windows x64 上验证过。QtWebEngine 的构建脚本、patch、依赖 DLL 都针对 Windows 调过。Linux 版需要重新走一遍 BUILD_NOTES 里的流程。
+**Q: Why a self-compiled PyQt6 instead of the pip one?**
+A: The pip Qt wheels are built without H.264. Only the self-compiled build has it. They can coexist, but
+don't mix them inside one venv.
 
-**Q: 能不能直接用 PySide6？**
+**Q: Why only Windows?**
+A: Only Windows x64 is validated. The build scripts, patches and dependency DLLs are all Windows-specific;
+Linux/macOS need a fresh pass through `BUILD_NOTES.md`.
 
-A: 不行。PySide6 官方 wheel 同样不带 H.264，而且它的 QtWebEngine 版本与 PyQt6 不完全对应。项目使用 PyQt6 6.7.1 + 自编译 Qt 6.7.3。
+**Q: Can I use PySide6?**
+A: No. PySide6's official wheel also lacks H.264, and its QtWebEngine version doesn't line up with PyQt6.
+This project pins PyQt6 6.7.1 + self-compiled Qt 6.7.3.
 
-**Q: 为什么仓库里不直接附带 Qt6-custom？**
+**Q: Why isn't Qt6-custom in the repo?**
+A: It's too large for GitHub file limits (>2 GB unpacked; ~500 MB zipped). It ships as a Releases asset.
 
-A: 太大会超过 GitHub 单文件限制（>2 GB）。Qt6-custom 打包后约 500 MB，放在 Releases 附件里。
+**Q: How is this different from ungoogled-chromium?**
+A: ungoogled-chromium is C++; one change means a rebuild. PureBrowser is Python; one `.py` edit takes effect.
 
-**Q: 和 ungoogled-chromium 有什么区别？**
+**Q: Why PyInstaller and not Nuitka (older docs mentioned Nuitka)?**
+A: The current, working pipeline is PyInstaller (`PureBrowser.spec` + `runtime_hook.py`) wrapped by Inno
+Setup (`PureBrowser.iss`), driven by `rebuild.bat`. Older notes mentioning Nuitka are obsolete.
 
-A: ungoogled-chromium 是 C++ 项目，改一行要重编。PureBrowser 是 Python 项目，改一行 py 文件就有效果。定位不同。
+**Q: Why is the ad-blocker so small?**
+A: It's a deliberate, dependency-free host blocklist. Pull requests with larger, maintained rule sets are
+welcome — see the Roadmap.
 
-## 贡献
+## Contributing
 
-欢迎任何形式的贡献：
+- Open an issue for bugs or feature requests.
+- Send a PR with code changes.
+- Reproduce `BUILD_NOTES.md` and report new pitfalls.
+- Translate the docs.
 
-- 提 Issue 报告 bug 或功能建议
-- 提交 PR 修改代码
-- 复现 `BUILD_NOTES.md` 并在 Issue 里报告新坑
-- 翻译文档
+## License
 
-## 许可
+Project code (`src/`, `tools/`, etc.) is licensed under **MPL-2.0** — see [LICENSE](LICENSE).
 
-本项目采用多层许可：
+Distributed binaries also link **PyQt6 (GPL edition)**, so a binary distribution is GPL-3.0 overall.
+For closed-source commercial use, buy a commercial PyQt6 license from Riverbank and comply with Qt's
+commercial terms.
 
-| 层 | 许可 | 说明 |
-|---|---|---|
-| 自有代码（`src/`、`tools/` 等） | **MPL-2.0** | 见 [LICENSE](LICENSE) |
-| PyQt6（GPL 版） | **GPL-3.0** | 从 Riverbank 获取，非商业使用走 GPL |
-| Qt 6.7.3 / QtWebEngine | **LGPL-3.0** with Qt exception | 从 Qt 官方源码编译 |
-| 分发的二进制包 | **受 GPL-3.0 约束** | 因链接 GPL 版 PyQt6 |
-
-**如果你计划闭源商用**：
-
-1. 向 Riverbank 购买 PyQt6 商业许可
-2. 遵守 Qt 商业条款
-3. 联系作者
-
-**如果开源**：
-
-- 整个分发物视为 GPL-3.0
-- 你的改动需同样以 GPL-3.0 兼容许可发布
-
-## 致谢
-
-Qt 6.7.3 编译过程中踩过的所有坑、所有 patch、所有环境配置，都记录在 [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md)。这份文档本身也是本项目的产物之一，供后来者参考。
-
----
-
-*最后更新：2026-09-29*
+*Last updated: 2026-10-01*

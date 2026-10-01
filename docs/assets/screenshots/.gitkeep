@@ -1,0 +1,9 @@
+Screenshots referenced by README.md / README.zh-CN.md live here.
+
+Expected files (PNG, ~1280px wide):
+  main-light.png        - main window, light theme (new tab + tab bar + toolbar)
+  main-dark.png         - main window, dark theme
+  dropdown-history.png  - history dropdown panel (Today/Yesterday/Earlier, scrollable)
+  dropdown-downloads.png- downloads panel (in-progress progress + speed + size) + toolbar badge
+  context-menu.png      - custom Chinese right-click menu
+  settings.png          - purebrowser://settings page

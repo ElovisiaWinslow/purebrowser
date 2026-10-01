@@ -33,6 +33,6 @@ desktop.ini
 
 # 日志
 *.log
-# icon source (regenerate .ico via make_ico.py)
+# icon source (kept out of the repo; regenerate the .ico / docs logo with a local one-off script)
 resources/purebrowser_source.png
 installer/

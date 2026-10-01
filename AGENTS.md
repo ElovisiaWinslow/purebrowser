@@ -37,6 +37,7 @@ pip install PyQt6-Qt6
 pip install PyQt6-WebEngine
 pip install PyQt6-WebEngine-Qt6
 pip install --upgrade PyQt6
+pip install --force-reinstall PyQt6
 pip uninstall PyQt6
 pip uninstall PyQt6-Qt6
 pip uninstall PyQt6-WebEngine
@@ -75,9 +76,13 @@ D:\develop\Qt6-custom\          # 自编译 Qt 安装目录，任何文件都不
 D:\develop\qt6-build\            # 构建产物
 D:\develop\qt6-src\              # Qt 源码
 D:\develop\qt-build-archive\     # 归档，只读
-D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6\      # 自编译 PyQt6
-D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编译
+D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6\   # 自编译 PyQt6
+                                 # 注意：PyQt6-WebEngine 也折叠在此目录下
+                                 # （QtWebEngineWidgets.pyd / QtWebEngineCore.pyd 等）
 ```
+
+> 说明：`site-packages\PyQt6_WebEngine\` 目录**并不存在**——PyQt6-WebEngine 的扩展
+> 都装在 `site-packages\PyQt6\` 里。不要去找/创建 `PyQt6_WebEngine\`。
 
 ### 2.4 禁止的"清理"操作
 
@@ -105,21 +110,25 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 
 ## 三、允许改动的范围
 
-以下文件可以自由修改、优化、重构：
+### 3.1 总原则
 
-### 3.1 主逻辑
+**除第二节（冻结文件）与二点五节（文件系统红线）外，以下均可自由修改、优化、重构：**
 
-- `src/purebrowser/ui/window.py` — 主窗口、标签、菜单
-- `src/purebrowser/ui/tab.py` — 标签封装
-- `src/purebrowser/ui/urlbar.py` — 地址栏补全
-- `src/purebrowser/pages/downloads.py` — 下载管理
-- `src/purebrowser/pages/pages.py` — 本地页面
-- `src/purebrowser/core/settings.py` — 配置读写
-- `src/purebrowser/data/storage.py` — SQLite
-- `src/purebrowser/data/history.py` — 历史
-- `src/purebrowser/data/bookmarks.py` — 书签
-- `src/purebrowser/core/locations.py` — 路径管理
-- `src/purebrowser/app.py` — QApplication 引导（谨慎）
+- `src/purebrowser/**`（含 `ui/`、`core/`、`data/`、`pages/`）
+- `resources/**`
+- `tools/**`（脚本与测试）
+- 新增文档（`docs/` 下新增文件；`docs/BUILD_NOTES.md` 除外）
+
+当前主要文件（示例，非穷举）：
+
+- UI：`ui/window.py`、`ui/tab.py`、`ui/tab_area.py`、`ui/tabbar.py`、`ui/urlbar.py`、
+  `ui/theme.py`、`ui/icons.py`、`ui/hud.py`、`ui/menu_rows.py`、`ui/context_menu.py`、
+  `ui/dropdown.py`、`ui/session_prompt.py`、`ui/freeze_overlay.py`
+- Pages：`pages/pages.py`、`pages/newtab.py`、`pages/downloads.py`
+- Data：`data/storage.py`、`data/history.py`、`data/bookmarks.py`、`data/favicons.py`、
+  `data/downloads_store.py`、`data/session.py`
+- Core（非冻结项）：`core/settings.py`、`core/locations.py`
+- Entry（谨慎）：`app.py`
 
 ### 3.2 UI 和资源
 
@@ -132,7 +141,7 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 ### 3.3 工具和文档
 
 - `tools/` 下的脚本
-- `README.md`
+- `README.md` / `README.zh-CN.md`
 - 新增的文档
 - 测试
 
@@ -146,7 +155,7 @@ D:\PythonProject\purebrowser\.venv\Lib\site-packages\PyQt6_WebEngine\  # 自编�
 
 ## 四、修改后的强制自检
 
-每次改动后，**必须**跑以下命令并确认输出：
+每次改动后，**必须**跑相应命令并确认输出。
 
 ### 4.1 确认 Qt 版本没被顶掉
 
@@ -177,25 +186,70 @@ D:\PythonProject\purebrowser\.venv\Scripts\python.exe -c "from PyQt6.QtWebEngine
 D:\PythonProject\purebrowser\.venv\Scripts\python.exe -m purebrowser
 ```
 
-窗口应正常打开。**改动后，自己跑一次，看新标签页能加载，地址栏能输入，历史菜单能弹出。**
+窗口应正常打开。**改动后，自己跑一次**，确认：
 
-### 4.4 如果改了 tab 或 window，额外验证
-
-- 点 `+` 新标签
-- 地址栏输入 `example.com` 能打开
+- 新标签页能加载
+- 地址栏能输入并能打开 `example.com`
 - 输入 `purebrowser://history` 能打开历史页
+- 历史 / 书签 / 下载 **下拉面板**能弹出且可上下滚动（不是旧的 QMenu）
 - `Ctrl+T` / `Ctrl+W` / `Ctrl+L` 快捷键有效
+
+### 4.4 测试脚本（共 5 个）
+
+| 脚本 | 用途 | 联网 | 何时必跑 |
+|---|---|---|---|
+| `tools/smoke_test.py` | 免 GUI 基础检查（版本 / 导入 / 数据目录 / 无官方 Qt6 覆盖） | 否 | **每次改动都跑** |
+| `tools/e2e_test.py` | H.264 可用性检测（`avc1`） | 否 | 改 `profile.py` / `flags.py` / `tab.py` / `window.py` / `pyproject.toml` / `requirements.txt`（见 4.6） |
+| `tools/regression_test.py` | GUI 回归：会话与窗口状态、右键菜单不泄漏 / 非分层、下载面板进度与角标、下拉滚动、Ctrl+F 桥接、全屏客户区 | 否 | 改 `ui/**`、`data/**`、`pages/**` 建议跑 |
+| `tools/fullscreen_harness_test.py` | 离线全屏状态机（无中间态几何） | 否 | 改 `window.py` / `tab.py` 的全屏相关必跑 |
+| `tools/fullscreen_test.py` | 联网全屏 e2e（真实站点，Fullscreen API 全链路） | 是 | 改全屏链路时跑；网络不可达会 SKIP（退出码 2） |
+
+命令：
+
+```cmd
+D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\smoke_test.py
+D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\regression_test.py
+D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\e2e_test.py
+D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\fullscreen_harness_test.py
+```
+
+退出码约定：`0` 通过、`1` 失败、`2` 跳过（如网络不可达）。
 
 ### 4.5 如果改了拦截器或隐私相关，额外验证
 
 - 打开一个包含广告的网站
 - 确认广告没加载出来
 
-### 4.6 一键冒烟测试（推荐）
+### 4.6 H.264 守护：端到端必须 `avc1 : probably`
+
+以下改动**必须**额外跑 `tools/e2e_test.py`：
+
+- `src/purebrowser/core/profile.py`
+- `src/purebrowser/core/privacy/flags.py`
+- `src/purebrowser/ui/tab.py`
+- `src/purebrowser/ui/window.py`
+- `pyproject.toml` / `requirements.txt` 里的依赖相关部分
+
+命令：
+
 ```cmd
-D:\PythonProject\purebrowser\.venv\Scripts\python.exe D:\PythonProject\purebrowser\tools\smoke_test.py
+D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\e2e_test.py
 ```
-- 所有检查项通过（全部通过）才算改动安全。
+
+必须输出：
+
+```
+avc1   : probably
+[OK]   H.264 可用（avc1 = probably）
+```
+
+若输出 `(不支持)` 或 `[FAIL]`，**立即停止改动**，报告用户。
+这意味着自编译 QtWebEngine 被污染，或某个依赖 DLL 缺失。
+
+### 4.7 如果改了打包相关（spec / runtime_hook / rebuild.bat / iss）
+
+必须先 `rebuild.bat` 重新打包，再在 `dist\PureBrowser\PureBrowser.exe` 上实际验证（见第十节）。
+
 ---
 
 ## 五、环境约束
@@ -209,6 +263,7 @@ D:\PythonProject\purebrowser\.venv\Scripts\python.exe D:\PythonProject\purebrows
 | 自编译 Qt | `D:\develop\Qt6-custom` |
 | 构建档案 | `D:\develop\qt-build-archive` |
 | 归档 zip | `D:\develop\qt-build-archive.zip` |
+| 临时工作区 | `D:\T\opencode`（仅在此建临时文件） |
 
 ### 5.2 必需的环境变量
 
@@ -263,7 +318,7 @@ copy /Y D:\develop\qt-build-archive\BUILD_NOTES.md D:\PythonProject\purebrowser\
 ### 7.1 小步提交
 
 - 每次改动只做一件事
-- 改完立刻跑第四节的自检
+- 改完立刻跑第四节中该改动涉及的测试（见 4.4 表格）
 - 自检通过再继续
 
 ### 7.2 不确定时先问
@@ -281,8 +336,8 @@ copy /Y D:\develop\qt-build-archive\BUILD_NOTES.md D:\PythonProject\purebrowser\
 改动后报告给用户时，包含：
 
 1. 改了什么文件，为什么
-2. 第四节的自检输出（原样贴）
-3. 有没有不确定的地方
+2. 第四节相关的自检输出（原样贴）
+3. 有没有不确定的地方 / 未做/妥协项
 
 ### 7.4 不要做的事
 
@@ -291,6 +346,30 @@ copy /Y D:\develop\qt-build-archive\BUILD_NOTES.md D:\PythonProject\purebrowser\
 - 不要加 CI/CD 配置（这是 Alpha 阶段，暂不需要）
 - 不要"美化"代码风格（除非用户明确要求）
 - 不要加 emoji 到代码里
+
+### 7.5 提交规范（commit）
+
+- **未经用户明确许可，不要 `commit` / `push`。** 默认只改工作区并报告。
+- 一次提交只做一件事；文档改动单独成 commit。
+- **不要 `amend` 已有 commit**（尤其是可能已推送的）。改错了就再补一个新 commit。
+- commit message 前缀：`feat` / `fix` / `docs` / `build` / `chore` / `test` / `refactor`，示例：
+  - `fix: fullscreen client area covers taskbar`
+  - `docs: rewrite README (bilingual) + AGENTS`
+- **不要提交**：`dist/`、`build/`、`installer/`、`*.db`、`settings.json`、`location.txt`、任何密钥/令牌/本机绝对路径产物（这些已在 `.gitignore`）。
+- 提交前先 `git status` / `git diff` 自查，只 stage 本次改动涉及的文件。
+
+### 7.6 测试脚本加固模板
+
+新增/修改 `tools/` 下的 GUI 测试时，遵循现有脚本的模式：
+
+- **硬超时**：`QTimer.singleShot(HARD_TIMEOUT_MS, ...)` 兜底，避免挂死。
+- **销毁检测**：用 `sip.isdeleted(obj)`、`destroyed` 信号、或
+  `QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)` 确认对象真的释放。
+- **退出前先关窗**：先 `win.close()` 再 `app.exit(code)`，规避 QtWebEngine 退出时的偶发
+  access violation（0xC0000005）。
+- **能离线就别联网**：网络用例用 `loadFinished=False` / 超时判为 SKIP。
+- **产物只写 `D:\T\opencode\`**（见二点五节）。
+- **退出码**：`0` 通过、`1` 失败、`2` 跳过。
 
 ---
 
@@ -316,7 +395,7 @@ PureBrowser 的目标用户是：
 
 ## 九、相关文档
 
-- `README.md` — 项目对外介绍
+- `README.md` / `README.zh-CN.md` — 项目对外介绍（英文精炼 / 中文完整）
 - `docs/BUILD_NOTES.md` — 自编译 QtWebEngine 的完整记录
 - `docs/BUILD_NOTES.md` 第六节 — 所有 patch 详解（P1~P12）
 
@@ -324,29 +403,31 @@ PureBrowser 的目标用户是：
 
 ---
 
-*本文件最后更新：2026-09-29*
-*修改本文件需用户明确许可。*
-### 4.6 端到端测试：H.264 可用性
+## 十、打包约束
 
-以下改动**必须**额外跑 `tools/e2e_test.py`：
+打包链：**PyInstaller + Inno Setup**（由 `rebuild.bat` 驱动）。
 
-- `src/purebrowser/core/profile.py`
-- `src/purebrowser/core/privacy/flags.py`
-- `src/purebrowser/ui/tab.py`
-- `src/purebrowser/ui/window.py`
-- `pyproject.toml` / `requirements.txt` 里的依赖相关部分
+| 文件 | 职责 |
+|---|---|
+| `PureBrowser.spec` | PyInstaller 配方：收集自编译 Qt6 的 DLL/插件/资源与 `QtWebEngineProcess.exe`；入口 `src/purebrowser/__main__.py`；`runtime_hooks=[runtime_hook.py]`。 |
+| `runtime_hook.py` | 打包后运行时设置 5 个环境变量（见下）。 |
+| `rebuild.bat` | 一键：杀旧进程 → `pyinstaller PureBrowser.spec --noconfirm` → Inno Setup `ISCC PureBrowser.iss`。 |
+| `PureBrowser.iss` | Inno Setup 脚本；产物 `installer\Output\PureBrowserSetup.exe`。 |
 
-命令：
+约束：
 
-    D:\PythonProject\purebrowser\.venv\Scripts\python.exe tools\e2e_test.py
-
-必须输出：
-
-    avc1   : probably
-    [OK]   H.264 可用（avc1 = probably）
-
-若输出 `(不支持)` 或 `[FAIL]`，**立即停止改动**，报告用户。
-这意味着自编译 QtWebEngine 被污染，或某个依赖 DLL 缺失。
+1. **绝对路径写死**：`PureBrowser.spec`（`PROJECT` / `SRC` / `QT6_DIR` / `RESOURCES`）、
+   `rebuild.bat`（`PROJECT` / `PYINSTALLER` / `SPEC` / `ISCC` / `ISS`）、`PureBrowser.iss`
+   （`OutputDir` / `SetupIconFile`）都写死了本机路径。**改这些文件时不要"顺手"改成相对路径**，
+   除非用户明确要求；换机器由用户自行修改。
+2. **`runtime_hook.py` 的 5 个环境变量不要破坏**：
+   `QT_PLUGIN_PATH`、`QT_QPA_PLATFORM_PLUGIN_PATH`、`QTWEBENGINEPROCESS_PATH`、
+   `QTWEBENGINE_RESOURCES_PATH`、`QTWEBENGINE_LOCALES_PATH`。删任意一个都会让打包版起不来。
+3. **不要提交打包产物**：`dist/`、`build/`、`installer/` 已在 `.gitignore`，不要 `-f` 强制加入。
+4. 改打包相关后，**必须先 `rebuild.bat` 重新打包，再在 `dist\PureBrowser\PureBrowser.exe` 上验证**
+   （源码跑通不代表打包版跑通）。
+5. `README` 不进安装包（只影响仓库），但打包产物路径/行为变化时，同步更新
+   `README.md` / `README.zh-CN.md` 的 Packaging 小节。
 
 ---
 
@@ -379,3 +460,19 @@ PureBrowser 的目标用户是：
 5. **`newtab.html` 解冻**：从冻结清单移除。
    原因：B-1.1 主题系统落地后，暗色模式下新标签页正文仍是白底，视觉不一致。
    红线：保留 `/* __THEME_VARS__ */` 占位符；不要用 `Canvas`/`CanvasText` 系统色；所有颜色用 CSS 变量。
+
+6. **最大化按钮改为自维护状态机**：`window.py` 用 `self._maximized` 作为唯一状态，`_toggle_maximize`
+   只翻转该布尔并调用原生 `ShowWindow`；max 键在 `_native_hit_test` 里返回 `HTCLIENT`（不再返回
+   `HTMAXBUTTON`，即放弃 Win11 贴靠 Snap）。原因是 `isMaximized()` 与原生状态失配 + HTMAXBUTTON
+   点击被系统接管，导致"图标对、动作不对"。
+   红线：不要改回"每次点击都查 `isMaximized()`/`IsZoomed()`"或用信号 `state` 直接刷图标。
+
+7. **下拉菜单为自绘面板**：历史/书签/下载用 `ui/dropdown.py` 的 `DropdownPanel`（非 QMenu、不透明、
+   可滚动、实时刷新）；右键菜单用 `ui/context_menu.py`。工具栏不再挂 `QGraphicsDropShadowEffect`
+   （阴影会让每次重绘离屏渲染 + 高斯模糊，拖累视频）。
+   红线：不要改用回 `QMenu` 富行 + 阴影；不要在工具栏重新加 `QGraphicsDropShadowEffect`。
+
+---
+
+*本文件最后更新：2026-10-01*
+*修改本文件需用户明确许可。*
