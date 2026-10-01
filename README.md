@@ -243,7 +243,6 @@ purebrowser/
 
 ## Screenshots
 
-> Placeholder paths — drop the PNGs into `docs/assets/screenshots/` and they appear here.
 
 | Main (light) | Main (dark) |
 |---|---|
