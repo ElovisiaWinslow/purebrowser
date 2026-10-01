@@ -270,7 +270,6 @@ purebrowser/
 
 ## 截图
 
-> 下面是占位路径：把 PNG 放进 `docs/assets/screenshots/` 后即会显示。
 
 | 主界面（亮色） | 主界面（暗色） |
 |---|---|
