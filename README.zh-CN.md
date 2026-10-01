@@ -11,6 +11,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/ElovisiaWinslow/purebrowser/releases/latest"><img src="https://img.shields.io/github/v/release/ElovisiaWinslow/purebrowser" alt="Latest Release"></a>
+  <a href="https://github.com/ElovisiaWinslow/purebrowser/releases"><img src="https://img.shields.io/github/downloads/ElovisiaWinslow/purebrowser/total" alt="Downloads"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg" alt="Platform">
