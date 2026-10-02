@@ -154,6 +154,20 @@ purebrowser/
 └─ LICENSE / README.md / README.zh-CN.md / AGENTS.md
 ```
 
+## 界面截图
+
+| 主界面（亮色） | 主界面（暗色） |
+|---|---|
+| ![主界面亮色](docs/assets/screenshots/main-light.png) | ![主界面暗色](docs/assets/screenshots/main-dark.png) |
+
+| 历史面板 | 下载面板 |
+|---|---|
+| ![历史面板](docs/assets/screenshots/dropdown-history.png) | ![下载面板](docs/assets/screenshots/dropdown-downloads.png) |
+
+| 右键菜单 | 设置页 |
+|---|---|
+| ![右键菜单](docs/assets/screenshots/context-menu.png) | ![设置页](docs/assets/screenshots/settings.png) |
+
 ## 功能
 
 **浏览与标签页**
