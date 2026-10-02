@@ -47,7 +47,7 @@ The three things that set it apart:
 | PyQt6 | 6.7.1 | **self-compiled wheel** (not PyPI) |
 | PyQt6_sip | 13.8.0 | PyPI |
 | PyQt6-WebEngine | 6.7.0 | **self-compiled wheel** (not PyPI) |
-| Qt / QtWebEngine | 6.7.3 + H.264 | **self-compiled**, installed at `D:\develop\Qt6-custom` |
+| Qt / QtWebEngine | 6.7.3 + H.264 | **self-compiled** |
 
 Environment variables (user level): `QT_PLUGIN_PATH` and `PATH` must point into the custom Qt install.
 
@@ -57,12 +57,16 @@ Pure-Python dependencies (declared in `pyproject.toml`): `httpx`, `platformdirs`
 
 ### Normal users
 
-> No public installer yet. Current status: **alpha**.
+Download the installer from [Releases](https://github.com/ElovisiaWinslow/purebrowser/releases/latest):
+
+- `PureBrowserSetup.exe` — Windows x64 installer (supports custom install path)
+
+Run it, then launch PureBrowser from the Start Menu.
 
 ### Developers: clone and run
 
 ```bash
-git clone https://github.com/<your-name>/purebrowser.git
+git clone https://github.com/ElovisiaWinslow/purebrowser.git
 cd purebrowser
 ```
 
@@ -76,45 +80,25 @@ pip install -e .
 
 `pip install -e .` installs only `httpx` and `platformdirs`; it never touches Qt.
 
-**Step 2 — install the self-compiled PyQt6**
+**Step 2 — install self-compiled PyQt6 + Qt6 runtime**
 
-Download from [Releases](https://github.com/<your-name>/purebrowser/releases):
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — it covers, step by step:
 
-- `PyQt6-6.7.1-cp38-abi3-win_amd64.whl`
-- `PyQt6_WebEngine-6.7.0-cp38-abi3-win_amd64.whl`
-- `Qt6-custom.zip` (~500 MB)
+- downloading the prebuilt PyQt6 wheels and Qt6 runtime from [Releases](https://github.com/ElovisiaWinslow/purebrowser/releases)
+- extracting the Qt6 runtime to a permanent path
+- setting `PATH` / `QT_PLUGIN_PATH` environment variables
+- verifying H.264
 
-```cmd
-pip uninstall PyQt6 PyQt6-Qt6 PyQt6-WebEngine PyQt6-WebEngine-Qt6 PyQt6_sip -y
-
-pip install PyQt6-6.7.1-cp38-abi3-win_amd64.whl --no-deps
-pip install PyQt6_sip==13.8.0 --no-deps
-pip install PyQt6_WebEngine-6.7.0-cp38-abi3-win_amd64.whl --no-deps
-```
-
-> **Important:** never install `PyQt6-Qt6` or `PyQt6-WebEngine-Qt6`. They overwrite the self-compiled Qt.
-
-**Step 3 — deploy the self-compiled Qt**
-
-Unzip `Qt6-custom.zip` to `D:\develop\Qt6-custom`, then set the user environment variables:
-
-```powershell
-$p = [Environment]::GetEnvironmentVariable("Path", "User")
-[Environment]::SetEnvironmentVariable("Path", "D:\develop\Qt6-custom\bin;" + $p, "User")
-[Environment]::SetEnvironmentVariable("QT_PLUGIN_PATH", "D:\develop\Qt6-custom\plugins", "User")
-```
-
-Restart all terminals so the variables take effect.
-
-**Step 4 — run**
+**Step 3 — run**
 
 ```cmd
 python -m purebrowser
 ```
 
-### Kernel maintainers: build QtWebEngine from scratch
+### Build from source
 
-See [`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md). Expect 2–5 days and many pitfalls; every one is recorded.
+- **Using prebuilt dependencies** (recommended): see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+- **Rebuilding QtWebEngine from scratch**: see [docs/BUILD_NOTES.md](docs/BUILD_NOTES.md) — expect 2–5 days and many pitfalls; every one is recorded.
 
 ## Packaging (Windows)
 
@@ -171,7 +155,7 @@ purebrowser/
 ├─ resources/                            # newtab.html, purebrowser.ico
 ├─ tools/                                # smoke_test, e2e_test, regression_test,
 │                                        # fullscreen_harness_test, fullscreen_test, audit/net_audit.py
-├─ docs/                                 # BUILD_NOTES.md, assets/ (logo + screenshots)
+├─ docs/                                 # BUILD_NOTES.md, DEVELOPMENT.md, assets/ (logo + screenshots)
 ├─ PureBrowser.spec / runtime_hook.py / rebuild.bat / PureBrowser.iss
 ├─ pyproject.toml / requirements.txt
 └─ LICENSE / README.md / README.zh-CN.md / AGENTS.md
@@ -243,21 +227,6 @@ purebrowser/
 | "Edit and run" | edit `.py` | rebuild hours | edit `.py` | edit C++ |
 | Target | learn / customize / research | hardcore users | keyboard users | privacy users |
 
-## Screenshots
-
-
-| Main (light) | Main (dark) |
-|---|---|
-| ![main light](docs/assets/screenshots/main-light.png) | ![main dark](docs/assets/screenshots/main-dark.png) |
-
-| History panel | Downloads panel |
-|---|---|
-| ![history](docs/assets/screenshots/dropdown-history.png) | ![downloads](docs/assets/screenshots/dropdown-downloads.png) |
-
-| Right-click menu | Settings |
-|---|---|
-| ![context menu](docs/assets/screenshots/context-menu.png) | ![settings](docs/assets/screenshots/settings.png) |
-
 ## Roadmap
 
 **Done**
@@ -301,8 +270,8 @@ Linux/macOS need a fresh pass through `BUILD_NOTES.md`.
 A: No. PySide6's official wheel also lacks H.264, and its QtWebEngine version doesn't line up with PyQt6.
 This project pins PyQt6 6.7.1 + self-compiled Qt 6.7.3.
 
-**Q: Why isn't Qt6-custom in the repo?**
-A: It's too large for GitHub file limits (>2 GB unpacked; ~500 MB zipped). It ships as a Releases asset.
+**Q: Why isn't Qt6-runtime in the repo?**
+A: It's too large for GitHub file limits. It ships as a Releases asset (`Qt6-runtime-win64.zip`, ~125 MB).
 
 **Q: How is this different from ungoogled-chromium?**
 A: ungoogled-chromium is C++; one change means a rebuild. PureBrowser is Python; one `.py` edit takes effect.
@@ -330,4 +299,4 @@ Distributed binaries also link **PyQt6 (GPL edition)**, so a binary distribution
 For closed-source commercial use, buy a commercial PyQt6 license from Riverbank and comply with Qt's
 commercial terms.
 
-*Last updated: 2026-10-01*
+*Last updated: 2026-10-02*
