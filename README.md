@@ -161,6 +161,20 @@ purebrowser/
 └─ LICENSE / README.md / README.zh-CN.md / AGENTS.md
 ```
 
+## Screenshots
+
+| Main (light) | Main (dark) |
+|---|---|
+| ![main light](docs/assets/screenshots/main-light.png) | ![main dark](docs/assets/screenshots/main-dark.png) |
+
+| History panel | Downloads panel |
+|---|---|
+| ![history](docs/assets/screenshots/dropdown-history.png) | ![downloads](docs/assets/screenshots/dropdown-downloads.png) |
+
+| Right-click menu | Settings |
+|---|---|
+| ![context menu](docs/assets/screenshots/context-menu.png) | ![settings](docs/assets/screenshots/settings.png) |
+
 ## Features
 
 **Browsing & tabs**
